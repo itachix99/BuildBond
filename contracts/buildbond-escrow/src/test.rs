@@ -287,7 +287,7 @@ fn test_activation_gate_enforcement() {
     let contract_id = env.register(BuildBondEscrowContract, ());
     let client = BuildBondEscrowContractClient::new(&env, &contract_id);
 
-    let (terms, owner, contractor, inspector, arbiter, _, _) =
+    let (terms, owner, contractor, inspector, arbiter, _, token_client) =
         create_test_terms(&env, FundingPolicy::FullyFunded);
     let milestones = create_test_milestones(&env);
     client.initialize(&terms, &milestones);
@@ -306,8 +306,14 @@ fn test_activation_gate_enforcement() {
     let res = client.try_activate(&owner);
     assert_eq!(res.err(), Some(Ok(BuildBondError::RoleNotAccepted)));
 
-    // 4. Arbiter accepts -> Activation succeeds
+    // 4. All roles accepted is not enough for a FullyFunded project.
     client.accept_role(&arbiter, &Role::Arbiter, &terms.terms_hash);
+    let res = client.try_activate(&owner);
+    assert_eq!(res.err(), Some(Ok(BuildBondError::InsufficientCoverage)));
+
+    // Full milestone coverage is required before activation.
+    token_client.mint(&owner, &60_000);
+    client.deposit(&owner, &60_000);
     client.activate(&owner);
 
     let project = client.project();
@@ -747,6 +753,19 @@ fn test_open_dispute_and_arbitration_resolution() {
     assert_eq!(
         acct_after.allocated + acct_after.contractor_payable + acct_after.owner_refundable,
         acct_after.deposited
+    );
+
+    // Owner refunds awarded by arbitration are withdrawable and consumed once.
+    client.withdraw_refund(&owner, &7_500);
+    assert_eq!(token_client.balance(&owner), 7_500);
+    assert_eq!(client.accounting().owner_refundable, 0);
+    assert_eq!(client.accounting().withdrawn, 7_500);
+    assert_eq!(client.claimable(&owner).owner_refundable, 0);
+
+    let res = client.try_withdraw_refund(&owner, &1);
+    assert_eq!(
+        res.err(),
+        Some(Ok(BuildBondError::InsufficientEscrowBalance))
     );
 }
 
