@@ -118,6 +118,7 @@ pub struct Milestone {
     pub id: u32,
     pub amount: i128,
     pub due_at: u64,
+    pub submitted_at: Option<u64>,
     pub inspection_deadline_secs: u64,
     pub evidence_hash: Option<BytesN<32>>,
     pub status: MilestoneStatus,

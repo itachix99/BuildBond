@@ -54,7 +54,7 @@ fn validate_accounting(accounting: &Accounting) -> Result<(), BuildBondError> {
 impl BuildBondEscrowContract {
     /// Returns the contract version symbol
     pub fn version(_env: Env) -> Symbol {
-        symbol_short!("v0_1_0")
+        symbol_short!("v0_1_1")
     }
 
     /// Initializes a dedicated project escrow with agreed terms and milestone schedule
@@ -98,6 +98,9 @@ impl BuildBondEscrowContract {
             if m.inspection_deadline_secs == 0 {
                 return Err(BuildBondError::InvalidTimestamp);
             }
+            if m.due_at == 0 {
+                return Err(BuildBondError::InvalidTimestamp);
+            }
 
             milestone_sum = milestone_sum
                 .checked_add(m.amount)
@@ -107,6 +110,7 @@ impl BuildBondEscrowContract {
                 id: m.id,
                 amount: m.amount,
                 due_at: m.due_at,
+                submitted_at: None,
                 inspection_deadline_secs: m.inspection_deadline_secs,
                 evidence_hash: None,
                 status: MilestoneStatus::Planned,
@@ -519,8 +523,14 @@ impl BuildBondEscrowContract {
             return Err(BuildBondError::InvalidState);
         }
 
+        let now = env.ledger().timestamp();
+        if now > m.due_at {
+            return Err(BuildBondError::InspectionDeadlinePassed);
+        }
+
         m.status = MilestoneStatus::Submitted;
         m.evidence_hash = Some(evidence_hash.clone());
+        m.submitted_at = Some(now);
 
         set_milestone(&env, milestone_id, &m);
         emit_milestone_submitted(
@@ -561,6 +571,14 @@ impl BuildBondEscrowContract {
         let mut m = get_milestone(&env, milestone_id)?;
         if m.status != MilestoneStatus::Submitted {
             return Err(BuildBondError::InvalidState);
+        }
+
+        let submitted_at = m.submitted_at.ok_or(BuildBondError::InvalidState)?;
+        let inspection_deadline = submitted_at
+            .checked_add(m.inspection_deadline_secs)
+            .ok_or(BuildBondError::ArithmeticOverflow)?;
+        if env.ledger().timestamp() >= inspection_deadline {
+            return Err(BuildBondError::InspectionDeadlinePassed);
         }
 
         match decision {
@@ -766,6 +784,7 @@ impl BuildBondEscrowContract {
         env: Env,
         initiator: Address,
         milestone_id: u32,
+        amount: i128,
         reason_hash: BytesN<32>,
     ) -> Result<(), BuildBondError> {
         if !is_initialized(&env) {
@@ -802,40 +821,57 @@ impl BuildBondEscrowContract {
 
         let mut accounting = get_accounting(&env)?;
         let prev_status = m.status;
-        let amount_disputed: i128;
+        if amount <= 0 {
+            return Err(BuildBondError::InvalidDisputeAmount);
+        }
+
+        let maximum_disputable: i128;
 
         if m.status == MilestoneStatus::InDefectPeriod {
-            amount_disputed = m
+            let deadline = m.defect_deadline_at.ok_or(BuildBondError::InvalidState)?;
+            if env.ledger().timestamp() >= deadline {
+                return Err(BuildBondError::ArbitrationDeadlinePassed);
+            }
+
+            maximum_disputable = m
                 .retainage_amount
                 .checked_sub(m.retained_released)
                 .ok_or(BuildBondError::ArithmeticOverflow)?;
 
-            if amount_disputed <= 0 {
-                return Err(BuildBondError::NothingToWithdraw);
+            // Defect-period disputes currently freeze the complete remaining
+            // retainage; partial retainage claims require a separate settled
+            // amount field to avoid making funds unclaimable.
+            if amount != maximum_disputable {
+                return Err(BuildBondError::InvalidDisputeAmount);
             }
 
-            let deadline = m.defect_deadline_at.unwrap_or(0);
             let now = env.ledger().timestamp();
             let remaining_secs = deadline.saturating_sub(now);
             m.frozen_remaining_secs = Some(remaining_secs);
 
             accounting.retainage_locked = accounting
                 .retainage_locked
-                .checked_sub(amount_disputed)
+                .checked_sub(amount)
                 .ok_or(BuildBondError::ArithmeticOverflow)?;
             accounting.disputed = accounting
                 .disputed
-                .checked_add(amount_disputed)
+                .checked_add(amount)
                 .ok_or(BuildBondError::ArithmeticOverflow)?;
         } else {
-            amount_disputed = m.amount;
+            maximum_disputable = m.amount;
+            // Pre-approval disputes freeze the complete milestone allocation.
+            // Partial claims would need a separate residual-liability field;
+            // reject them until that state model is introduced.
+            if amount != maximum_disputable {
+                return Err(BuildBondError::InvalidDisputeAmount);
+            }
             accounting.allocated = accounting
                 .allocated
-                .checked_sub(amount_disputed)
+                .checked_sub(amount)
                 .ok_or(BuildBondError::ArithmeticOverflow)?;
             accounting.disputed = accounting
                 .disputed
-                .checked_add(amount_disputed)
+                .checked_add(amount)
                 .ok_or(BuildBondError::ArithmeticOverflow)?;
         }
 
@@ -846,7 +882,7 @@ impl BuildBondEscrowContract {
             initiator: initiator.clone(),
             reason_hash: reason_hash.clone(),
             opened_at: env.ledger().timestamp(),
-            amount_disputed,
+            amount_disputed: amount,
             status: DisputeStatus::Open,
             previous_milestone_status: prev_status,
             frozen_remaining_secs: m.frozen_remaining_secs,
@@ -865,7 +901,7 @@ impl BuildBondEscrowContract {
             &env,
             milestone_id,
             &initiator,
-            amount_disputed,
+            amount,
             &reason_hash,
             env.ledger().timestamp(),
         );
@@ -929,8 +965,29 @@ impl BuildBondEscrowContract {
             .ok_or(BuildBondError::ArithmeticOverflow)?;
 
         if dispute.previous_milestone_status == MilestoneStatus::InDefectPeriod {
-            m.retained_released = m.retainage_amount;
-            m.status = MilestoneStatus::Settled;
+            let remaining_retainage = m
+                .retainage_amount
+                .checked_sub(m.retained_released)
+                .and_then(|remaining| remaining.checked_sub(dispute.amount_disputed))
+                .ok_or(BuildBondError::ArithmeticOverflow)?;
+
+            if remaining_retainage == 0 {
+                m.retained_released = m.retainage_amount;
+                m.status = MilestoneStatus::Settled;
+                m.frozen_remaining_secs = None;
+            } else {
+                // Any undisputed retainage remains locked and the defect timer
+                // resumes with the time that was frozen when the dispute opened.
+                m.status = MilestoneStatus::InDefectPeriod;
+                let frozen_remaining = m.frozen_remaining_secs.unwrap_or(0);
+                m.defect_deadline_at = env
+                    .ledger()
+                    .timestamp()
+                    .checked_add(frozen_remaining)
+                    .ok_or(BuildBondError::ArithmeticOverflow)?
+                    .into();
+                m.frozen_remaining_secs = None;
+            }
         } else {
             m.paid_amount = contractor_award;
             m.status = MilestoneStatus::Settled;

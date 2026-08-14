@@ -550,6 +550,69 @@ fn test_milestone_submission_and_rejection_resubmission() {
 }
 
 #[test]
+fn test_submission_after_due_date_is_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_000);
+
+    let contract_id = env.register(BuildBondEscrowContract, ());
+    let client = BuildBondEscrowContractClient::new(&env, &contract_id);
+    let (terms, owner, contractor, inspector, arbiter, _, token_client) =
+        create_test_terms(&env, FundingPolicy::FullyFunded);
+    let milestones = create_test_milestones(&env);
+
+    client.initialize(&terms, &milestones);
+    token_client.mint(&owner, &60_000);
+    client.deposit(&owner, &60_000);
+    client.accept_role(&contractor, &Role::Contractor, &terms.terms_hash);
+    client.accept_role(&inspector, &Role::Inspector, &terms.terms_hash);
+    client.accept_role(&arbiter, &Role::Arbiter, &terms.terms_hash);
+    client.activate(&owner);
+
+    env.ledger().set_timestamp(1_700_000_001);
+    let result = client.try_submit_milestone(&contractor, &1, &BytesN::random(&env));
+    assert_eq!(
+        result.err(),
+        Some(Ok(BuildBondError::InspectionDeadlinePassed))
+    );
+}
+
+#[test]
+fn test_inspection_after_submission_deadline_is_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_000);
+
+    let contract_id = env.register(BuildBondEscrowContract, ());
+    let client = BuildBondEscrowContractClient::new(&env, &contract_id);
+    let (terms, owner, contractor, inspector, arbiter, _, token_client) =
+        create_test_terms(&env, FundingPolicy::FullyFunded);
+    let milestones = create_test_milestones(&env);
+
+    client.initialize(&terms, &milestones);
+    token_client.mint(&owner, &60_000);
+    client.deposit(&owner, &60_000);
+    client.accept_role(&contractor, &Role::Contractor, &terms.terms_hash);
+    client.accept_role(&inspector, &Role::Inspector, &terms.terms_hash);
+    client.accept_role(&arbiter, &Role::Arbiter, &terms.terms_hash);
+    client.activate(&owner);
+
+    let evidence = BytesN::random(&env);
+    client.submit_milestone(&contractor, &1, &evidence);
+    env.ledger().set_timestamp(1_000 + 7 * 86400);
+    let result = client.try_inspect_milestone(
+        &inspector,
+        &1,
+        &InspectionDecision::Approve,
+        &BytesN::random(&env),
+    );
+    assert_eq!(
+        result.err(),
+        Some(Ok(BuildBondError::InspectionDeadlinePassed))
+    );
+}
+
+#[test]
 fn test_milestone_approval_and_retainage_split() {
     let env = Env::default();
     env.mock_all_auths();
@@ -705,11 +768,11 @@ fn test_open_dispute_and_arbitration_resolution() {
     // 1. Unauthorized party cannot open dispute
     let stranger = Address::generate(&env);
     let reason_1 = BytesN::random(&env);
-    let res = client.try_open_dispute(&stranger, &1, &reason_1);
+    let res = client.try_open_dispute(&stranger, &1, &25_000, &reason_1);
     assert_eq!(res.err(), Some(Ok(BuildBondError::Unauthorized)));
 
     // 2. Owner opens dispute on Milestone 1
-    client.open_dispute(&owner, &1, &reason_1);
+    client.open_dispute(&owner, &1, &25_000, &reason_1);
 
     let m1 = client.milestone(&1);
     assert_eq!(m1.status, MilestoneStatus::Disputed);
@@ -800,7 +863,7 @@ fn test_dispute_during_defect_period_freezes_timer() {
     // At t=2,000, Owner opens dispute on retainage
     env.ledger().set_timestamp(2_000);
     let reason = BytesN::random(&env);
-    client.open_dispute(&owner, &1, &reason);
+    client.open_dispute(&owner, &1, &2_500, &reason);
 
     let m1 = client.milestone(&1);
     assert_eq!(m1.status, MilestoneStatus::Disputed);
@@ -820,4 +883,46 @@ fn test_dispute_during_defect_period_freezes_timer() {
     assert_eq!(acct_after.disputed, 0);
     assert_eq!(acct_after.contractor_payable, 22_500 + 2_000); // 22.5k immediate + 2k award = 24.5k
     assert_eq!(acct_after.owner_refundable, 500);
+}
+
+#[test]
+fn test_dispute_amount_and_defect_deadline_are_enforced() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_000);
+
+    let contract_id = env.register(BuildBondEscrowContract, ());
+    let client = BuildBondEscrowContractClient::new(&env, &contract_id);
+    let (terms, owner, contractor, inspector, arbiter, _, token_client) =
+        create_test_terms(&env, FundingPolicy::FullyFunded);
+    let milestones = create_test_milestones(&env);
+
+    client.initialize(&terms, &milestones);
+    token_client.mint(&owner, &60_000);
+    client.deposit(&owner, &60_000);
+    client.accept_role(&contractor, &Role::Contractor, &terms.terms_hash);
+    client.accept_role(&inspector, &Role::Inspector, &terms.terms_hash);
+    client.accept_role(&arbiter, &Role::Arbiter, &terms.terms_hash);
+    client.activate(&owner);
+
+    client.submit_milestone(&contractor, &1, &BytesN::random(&env));
+
+    let reason = BytesN::random(&env);
+    let result = client.try_open_dispute(&owner, &1, &1, &reason);
+    assert_eq!(result.err(), Some(Ok(BuildBondError::InvalidDisputeAmount)));
+    let result = client.try_open_dispute(&owner, &1, &25_001, &reason);
+    assert_eq!(result.err(), Some(Ok(BuildBondError::InvalidDisputeAmount)));
+
+    client.inspect_milestone(
+        &inspector,
+        &1,
+        &InspectionDecision::Approve,
+        &BytesN::random(&env),
+    );
+    env.ledger().set_timestamp(1_000 + 90 * 86400);
+    let result = client.try_open_dispute(&owner, &1, &2_500, &reason);
+    assert_eq!(
+        result.err(),
+        Some(Ok(BuildBondError::ArbitrationDeadlinePassed))
+    );
 }
