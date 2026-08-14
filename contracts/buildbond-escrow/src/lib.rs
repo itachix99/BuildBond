@@ -8,19 +8,20 @@ pub mod types;
 pub mod test;
 
 use events::{
-    emit_project_activated, emit_project_created, emit_role_accepted, emit_role_declined,
+    emit_milestone_funded, emit_project_activated, emit_project_created, emit_project_funded,
+    emit_refund_withdrawn, emit_role_accepted, emit_role_declined,
 };
 use storage::{
     get_accounting, get_milestone, get_milestone_count, get_role_acceptance, get_role_address,
-    get_status, get_terms, is_initialized, set_accounting, set_initialized, set_milestone,
-    set_milestone_count, set_role_acceptance, set_status, set_terms,
+    get_status, get_terms, get_unallocated_funds, is_initialized, set_accounting, set_initialized,
+    set_milestone, set_milestone_count, set_role_acceptance, set_status, set_terms,
 };
 use types::{
-    AcceptanceView, Accounting, BuildBondError, Milestone, MilestoneInput, MilestoneStatus,
-    ProjectStatus, ProjectTerms, ProjectView, Role,
+    AcceptanceView, Accounting, BuildBondError, CoverageView, FundingPolicy, Milestone,
+    MilestoneInput, MilestoneStatus, ProjectStatus, ProjectTerms, ProjectView, Role,
 };
 
-use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
 
 #[contract]
 pub struct BuildBondEscrowContract;
@@ -140,7 +141,7 @@ impl BuildBondEscrowContract {
         }
 
         let status = get_status(&env)?;
-        if status != ProjectStatus::AwaitingAcceptance {
+        if status != ProjectStatus::AwaitingAcceptance && status != ProjectStatus::AwaitingFunding {
             return Err(BuildBondError::InvalidState);
         }
 
@@ -190,7 +191,7 @@ impl BuildBondEscrowContract {
         }
 
         let status = get_status(&env)?;
-        if status != ProjectStatus::AwaitingAcceptance {
+        if status != ProjectStatus::AwaitingAcceptance && status != ProjectStatus::AwaitingFunding {
             return Err(BuildBondError::InvalidState);
         }
 
@@ -257,6 +258,171 @@ impl BuildBondEscrowContract {
         Ok(())
     }
 
+    /// Deposits payment token into escrow custody, updating accounted liabilities and auto-allocating
+    pub fn deposit(env: Env, funder: Address, amount: i128) -> Result<(), BuildBondError> {
+        if !is_initialized(&env) {
+            return Err(BuildBondError::NotInitialized);
+        }
+
+        if amount <= 0 {
+            return Err(BuildBondError::InvalidAmount);
+        }
+
+        let status = get_status(&env)?;
+        if status == ProjectStatus::Completed
+            || status == ProjectStatus::Terminated
+            || status == ProjectStatus::Suspended
+        {
+            return Err(BuildBondError::InvalidState);
+        }
+
+        funder.require_auth();
+
+        let terms = get_terms(&env)?;
+        let mut accounting = get_accounting(&env)?;
+
+        let contract_address = env.current_contract_address();
+        let token_client = token::Client::new(&env, &terms.payment_token);
+        token_client.transfer(&funder, &contract_address, &amount);
+
+        accounting.deposited = accounting
+            .deposited
+            .checked_add(amount)
+            .ok_or(BuildBondError::ArithmeticOverflow)?;
+
+        // Auto-allocation under FullyFunded policy
+        let milestone_count = get_milestone_count(&env);
+        if terms.funding_policy == FundingPolicy::FullyFunded {
+            for i in 1..=milestone_count {
+                let mut m = get_milestone(&env, i)?;
+                if m.status == MilestoneStatus::Planned {
+                    let unallocated = get_unallocated_funds(&accounting)?;
+                    if unallocated >= m.amount {
+                        m.status = MilestoneStatus::Funded;
+                        set_milestone(&env, i, &m);
+                        accounting.allocated = accounting
+                            .allocated
+                            .checked_add(m.amount)
+                            .ok_or(BuildBondError::ArithmeticOverflow)?;
+                        emit_milestone_funded(&env, i, m.amount, env.ledger().timestamp());
+                    }
+                }
+            }
+        }
+
+        let coverage_bps = if terms.total_committed > 0 {
+            let ratio = accounting
+                .allocated
+                .checked_mul(10_000)
+                .ok_or(BuildBondError::ArithmeticOverflow)?
+                / terms.total_committed;
+            ratio as u32
+        } else {
+            10_000
+        };
+
+        set_accounting(&env, &accounting);
+        emit_project_funded(
+            &env,
+            &funder,
+            amount,
+            accounting.deposited,
+            coverage_bps,
+            env.ledger().timestamp(),
+        );
+
+        Ok(())
+    }
+
+    /// Allocates unallocated deposited funds to a specific planned milestone
+    pub fn allocate_to_milestone(
+        env: Env,
+        owner: Address,
+        milestone_id: u32,
+        amount: i128,
+    ) -> Result<(), BuildBondError> {
+        if !is_initialized(&env) {
+            return Err(BuildBondError::NotInitialized);
+        }
+
+        if amount <= 0 {
+            return Err(BuildBondError::InvalidAmount);
+        }
+
+        owner.require_auth();
+
+        let terms = get_terms(&env)?;
+        if owner != terms.owner {
+            return Err(BuildBondError::Unauthorized);
+        }
+
+        let mut m = get_milestone(&env, milestone_id)?;
+        if m.status != MilestoneStatus::Planned {
+            return Err(BuildBondError::InvalidState);
+        }
+
+        if amount != m.amount {
+            return Err(BuildBondError::InvalidAmount);
+        }
+
+        let mut accounting = get_accounting(&env)?;
+        let unallocated = get_unallocated_funds(&accounting)?;
+        if unallocated < amount {
+            return Err(BuildBondError::InsufficientCoverage);
+        }
+
+        m.status = MilestoneStatus::Funded;
+        accounting.allocated = accounting
+            .allocated
+            .checked_add(amount)
+            .ok_or(BuildBondError::ArithmeticOverflow)?;
+
+        set_milestone(&env, milestone_id, &m);
+        set_accounting(&env, &accounting);
+        emit_milestone_funded(&env, milestone_id, amount, env.ledger().timestamp());
+
+        Ok(())
+    }
+
+    /// Withdraws unallocated funds back to the project owner
+    pub fn withdraw_refund(env: Env, owner: Address, amount: i128) -> Result<(), BuildBondError> {
+        if !is_initialized(&env) {
+            return Err(BuildBondError::NotInitialized);
+        }
+
+        if amount <= 0 {
+            return Err(BuildBondError::InvalidAmount);
+        }
+
+        owner.require_auth();
+
+        let terms = get_terms(&env)?;
+        if owner != terms.owner {
+            return Err(BuildBondError::Unauthorized);
+        }
+
+        let mut accounting = get_accounting(&env)?;
+        let unallocated = get_unallocated_funds(&accounting)?;
+        if unallocated < amount {
+            return Err(BuildBondError::InsufficientEscrowBalance);
+        }
+
+        accounting.withdrawn = accounting
+            .withdrawn
+            .checked_add(amount)
+            .ok_or(BuildBondError::ArithmeticOverflow)?;
+
+        set_accounting(&env, &accounting);
+
+        let contract_address = env.current_contract_address();
+        let token_client = token::Client::new(&env, &terms.payment_token);
+        token_client.transfer(&contract_address, &owner, &amount);
+
+        emit_refund_withdrawn(&env, &owner, amount, env.ledger().timestamp());
+
+        Ok(())
+    }
+
     // --- Read Methods ---
 
     pub fn project(env: Env) -> Result<ProjectView, BuildBondError> {
@@ -283,5 +449,45 @@ impl BuildBondEscrowContract {
 
     pub fn role_acceptance(env: Env, role: Role) -> Option<AcceptanceView> {
         get_role_acceptance(&env, role)
+    }
+
+    pub fn coverage(env: Env) -> Result<CoverageView, BuildBondError> {
+        let terms = get_terms(&env)?;
+        let accounting = get_accounting(&env)?;
+        let milestone_count = get_milestone_count(&env);
+        let unallocated = get_unallocated_funds(&accounting)?;
+
+        let mut covered_count: u32 = 0;
+        for i in 1..=milestone_count {
+            let m = get_milestone(&env, i)?;
+            if m.status != MilestoneStatus::Planned {
+                covered_count += 1;
+            }
+        }
+
+        let coverage_bps = if terms.total_committed > 0 {
+            let ratio = accounting
+                .allocated
+                .checked_mul(10_000)
+                .ok_or(BuildBondError::ArithmeticOverflow)?
+                / terms.total_committed;
+            ratio as u32
+        } else {
+            10_000
+        };
+
+        let is_fully_covered =
+            accounting.allocated == terms.total_committed && covered_count == milestone_count;
+
+        Ok(CoverageView {
+            total_committed: terms.total_committed,
+            deposited: accounting.deposited,
+            allocated: accounting.allocated,
+            unallocated,
+            covered_milestones: covered_count,
+            total_milestones: milestone_count,
+            coverage_ratio_bps: coverage_bps,
+            is_fully_covered,
+        })
     }
 }

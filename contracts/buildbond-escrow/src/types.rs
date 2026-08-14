@@ -178,3 +178,16 @@ pub struct ProjectView {
     pub milestone_count: u32,
     pub accounting: Accounting,
 }
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CoverageView {
+    pub total_committed: i128,
+    pub deposited: i128,
+    pub allocated: i128,
+    pub unallocated: i128,
+    pub covered_milestones: u32,
+    pub total_milestones: u32,
+    pub coverage_ratio_bps: u32,
+    pub is_fully_covered: bool,
+}

@@ -102,3 +102,28 @@ pub fn get_role_address(terms: &ProjectTerms, role: Role) -> Address {
         Role::Arbiter => terms.arbiter.clone(),
     }
 }
+
+pub fn get_unallocated_funds(accounting: &Accounting) -> Result<i128, BuildBondError> {
+    let accounted_active = accounting
+        .allocated
+        .checked_add(accounting.contractor_payable)
+        .ok_or(BuildBondError::ArithmeticOverflow)?
+        .checked_add(accounting.retainage_locked)
+        .ok_or(BuildBondError::ArithmeticOverflow)?
+        .checked_add(accounting.disputed)
+        .ok_or(BuildBondError::ArithmeticOverflow)?
+        .checked_add(accounting.owner_refundable)
+        .ok_or(BuildBondError::ArithmeticOverflow)?
+        .checked_add(accounting.withdrawn)
+        .ok_or(BuildBondError::ArithmeticOverflow)?;
+
+    let unallocated = accounting
+        .deposited
+        .checked_sub(accounted_active)
+        .ok_or(BuildBondError::ArithmeticOverflow)?;
+
+    if unallocated < 0 {
+        return Err(BuildBondError::InsufficientEscrowBalance);
+    }
+    Ok(unallocated)
+}

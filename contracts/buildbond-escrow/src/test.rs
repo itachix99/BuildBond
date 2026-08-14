@@ -1,18 +1,40 @@
 #![cfg(test)]
 
 use super::*;
-use crate::types::{FundingPolicy, MilestoneInput, ProjectTerms, Role};
+use crate::types::{FundingPolicy, MilestoneInput, MilestoneStatus, ProjectTerms, Role};
 use soroban_sdk::{
     testutils::{Address as _, BytesN as _, Ledger},
-    Address, BytesN, Env, Vec,
+    token, Address, BytesN, Env, Vec,
 };
 
-fn create_test_terms(env: &Env) -> (ProjectTerms, Address, Address, Address, Address, Address) {
+fn create_test_token<'a>(
+    env: &'a Env,
+    admin: &Address,
+) -> (Address, token::StellarAssetClient<'a>) {
+    let sac = env.register_stellar_asset_contract_v2(admin.clone());
+    let client = token::StellarAssetClient::new(env, &sac.address());
+    (sac.address(), client)
+}
+
+fn create_test_terms<'a>(
+    env: &'a Env,
+    policy: FundingPolicy,
+) -> (
+    ProjectTerms,
+    Address,
+    Address,
+    Address,
+    Address,
+    Address,
+    token::StellarAssetClient<'a>,
+) {
     let owner = Address::generate(env);
     let contractor = Address::generate(env);
     let inspector = Address::generate(env);
     let arbiter = Address::generate(env);
-    let payment_token = Address::generate(env);
+    let token_admin = Address::generate(env);
+
+    let (payment_token, token_client) = create_test_token(env, &token_admin);
     let terms_hash = BytesN::random(env);
 
     let terms = ProjectTerms {
@@ -25,10 +47,18 @@ fn create_test_terms(env: &Env) -> (ProjectTerms, Address, Address, Address, Add
         retainage_bps: 1_000, // 10%
         defect_period_secs: 90 * 86400,
         terms_hash,
-        funding_policy: FundingPolicy::FullyFunded,
+        funding_policy: policy,
     };
 
-    (terms, owner, contractor, inspector, arbiter, payment_token)
+    (
+        terms,
+        owner,
+        contractor,
+        inspector,
+        arbiter,
+        payment_token,
+        token_client,
+    )
 }
 
 fn create_test_milestones(env: &Env) -> Vec<MilestoneInput> {
@@ -57,7 +87,8 @@ fn test_initialize_happy_path() {
     let contract_id = env.register(BuildBondEscrowContract, ());
     let client = BuildBondEscrowContractClient::new(&env, &contract_id);
 
-    let (terms, owner, _contractor, _inspector, _arbiter, _) = create_test_terms(&env);
+    let (terms, owner, _contractor, _inspector, _arbiter, _, _) =
+        create_test_terms(&env, FundingPolicy::FullyFunded);
     let milestones = create_test_milestones(&env);
 
     client.initialize(&terms, &milestones);
@@ -98,7 +129,7 @@ fn test_duplicate_initialization_rejected() {
     let contract_id = env.register(BuildBondEscrowContract, ());
     let client = BuildBondEscrowContractClient::new(&env, &contract_id);
 
-    let (terms, _, _, _, _, _) = create_test_terms(&env);
+    let (terms, _, _, _, _, _, _) = create_test_terms(&env, FundingPolicy::FullyFunded);
     let milestones = create_test_milestones(&env);
 
     client.initialize(&terms, &milestones);
@@ -115,7 +146,7 @@ fn test_initialization_validations() {
     let contract_id = env.register(BuildBondEscrowContract, ());
     let client = BuildBondEscrowContractClient::new(&env, &contract_id);
 
-    let (mut terms, _, _, _, _, _) = create_test_terms(&env);
+    let (mut terms, _, _, _, _, _, _) = create_test_terms(&env, FundingPolicy::FullyFunded);
     let milestones = create_test_milestones(&env);
 
     // 1. Invalid total amount <= 0
@@ -145,7 +176,8 @@ fn test_role_acceptance_happy_path() {
     let contract_id = env.register(BuildBondEscrowContract, ());
     let client = BuildBondEscrowContractClient::new(&env, &contract_id);
 
-    let (terms, _, contractor, inspector, arbiter, _) = create_test_terms(&env);
+    let (terms, _, contractor, inspector, arbiter, _, _) =
+        create_test_terms(&env, FundingPolicy::FullyFunded);
     let milestones = create_test_milestones(&env);
 
     client.initialize(&terms, &milestones);
@@ -178,7 +210,7 @@ fn test_role_acceptance_unauthorized_actor() {
     let contract_id = env.register(BuildBondEscrowContract, ());
     let client = BuildBondEscrowContractClient::new(&env, &contract_id);
 
-    let (terms, _, _, _, _, _) = create_test_terms(&env);
+    let (terms, _, _, _, _, _, _) = create_test_terms(&env, FundingPolicy::FullyFunded);
     let milestones = create_test_milestones(&env);
     client.initialize(&terms, &milestones);
 
@@ -195,7 +227,7 @@ fn test_role_acceptance_invalid_terms_hash() {
     let contract_id = env.register(BuildBondEscrowContract, ());
     let client = BuildBondEscrowContractClient::new(&env, &contract_id);
 
-    let (terms, _, contractor, _, _, _) = create_test_terms(&env);
+    let (terms, _, contractor, _, _, _, _) = create_test_terms(&env, FundingPolicy::FullyFunded);
     let milestones = create_test_milestones(&env);
     client.initialize(&terms, &milestones);
 
@@ -212,7 +244,7 @@ fn test_role_acceptance_duplicate_rejected() {
     let contract_id = env.register(BuildBondEscrowContract, ());
     let client = BuildBondEscrowContractClient::new(&env, &contract_id);
 
-    let (terms, _, contractor, _, _, _) = create_test_terms(&env);
+    let (terms, _, contractor, _, _, _, _) = create_test_terms(&env, FundingPolicy::FullyFunded);
     let milestones = create_test_milestones(&env);
     client.initialize(&terms, &milestones);
 
@@ -229,7 +261,7 @@ fn test_role_decline() {
     let contract_id = env.register(BuildBondEscrowContract, ());
     let client = BuildBondEscrowContractClient::new(&env, &contract_id);
 
-    let (terms, _, _, inspector, _, _) = create_test_terms(&env);
+    let (terms, _, _, inspector, _, _, _) = create_test_terms(&env, FundingPolicy::FullyFunded);
     let milestones = create_test_milestones(&env);
     client.initialize(&terms, &milestones);
 
@@ -253,7 +285,8 @@ fn test_activation_gate_enforcement() {
     let contract_id = env.register(BuildBondEscrowContract, ());
     let client = BuildBondEscrowContractClient::new(&env, &contract_id);
 
-    let (terms, owner, contractor, inspector, arbiter, _) = create_test_terms(&env);
+    let (terms, owner, contractor, inspector, arbiter, _, _) =
+        create_test_terms(&env, FundingPolicy::FullyFunded);
     let milestones = create_test_milestones(&env);
     client.initialize(&terms, &milestones);
 
@@ -281,4 +314,176 @@ fn test_activation_gate_enforcement() {
     // 5. Duplicate activation fails
     let res = client.try_activate(&owner);
     assert_eq!(res.err(), Some(Ok(BuildBondError::InvalidState)));
+}
+
+// ==========================================
+// Phase 4 Funding, Coverage & Accounting Tests
+// ==========================================
+
+#[test]
+fn test_deposit_and_auto_allocation_fully_funded() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(BuildBondEscrowContract, ());
+    let client = BuildBondEscrowContractClient::new(&env, &contract_id);
+
+    let (terms, owner, contractor, inspector, arbiter, _payment_token, token_client) =
+        create_test_terms(&env, FundingPolicy::FullyFunded);
+    let milestones = create_test_milestones(&env);
+
+    client.initialize(&terms, &milestones);
+
+    // Mint tokens to owner
+    token_client.mint(&owner, &100_000);
+    assert_eq!(token_client.balance(&owner), 100_000);
+
+    // Owner deposits full commitment (60,000)
+    client.deposit(&owner, &60_000);
+
+    // Check token custody
+    assert_eq!(token_client.balance(&contract_id), 60_000);
+    assert_eq!(token_client.balance(&owner), 40_000);
+
+    // Check accounting
+    let acct = client.accounting();
+    assert_eq!(acct.deposited, 60_000);
+    assert_eq!(acct.allocated, 60_000);
+
+    // Check both milestones are auto-funded
+    let m1 = client.milestone(&1);
+    assert_eq!(m1.status, MilestoneStatus::Funded);
+    let m2 = client.milestone(&2);
+    assert_eq!(m2.status, MilestoneStatus::Funded);
+
+    // Check coverage
+    let cov = client.coverage();
+    assert_eq!(cov.total_committed, 60_000);
+    assert_eq!(cov.deposited, 60_000);
+    assert_eq!(cov.allocated, 60_000);
+    assert_eq!(cov.unallocated, 0);
+    assert_eq!(cov.covered_milestones, 2);
+    assert_eq!(cov.coverage_ratio_bps, 10_000);
+    assert!(cov.is_fully_covered);
+
+    // All roles accept and activate
+    client.accept_role(&contractor, &Role::Contractor, &terms.terms_hash);
+    client.accept_role(&inspector, &Role::Inspector, &terms.terms_hash);
+    client.accept_role(&arbiter, &Role::Arbiter, &terms.terms_hash);
+    client.activate(&owner);
+
+    assert_eq!(client.project().status, ProjectStatus::Active);
+}
+
+#[test]
+fn test_rolling_funding_and_manual_allocation() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(BuildBondEscrowContract, ());
+    let client = BuildBondEscrowContractClient::new(&env, &contract_id);
+
+    let (terms, owner, _, _, _, _, token_client) = create_test_terms(&env, FundingPolicy::Rolling);
+    let milestones = create_test_milestones(&env);
+
+    client.initialize(&terms, &milestones);
+
+    // Mint tokens to owner
+    token_client.mint(&owner, &50_000);
+
+    // Deposit only Milestone 1 amount (25,000)
+    client.deposit(&owner, &25_000);
+
+    let mut cov = client.coverage();
+    assert_eq!(cov.deposited, 25_000);
+    assert_eq!(cov.allocated, 0); // Not auto-allocated under Rolling policy
+    assert_eq!(cov.unallocated, 25_000);
+
+    // Manual allocate to Milestone 1
+    client.allocate_to_milestone(&owner, &1, &25_000);
+
+    let m1 = client.milestone(&1);
+    assert_eq!(m1.status, MilestoneStatus::Funded);
+
+    let m2 = client.milestone(&2);
+    assert_eq!(m2.status, MilestoneStatus::Planned);
+
+    cov = client.coverage();
+    assert_eq!(cov.allocated, 25_000);
+    assert_eq!(cov.unallocated, 0);
+    assert_eq!(cov.covered_milestones, 1);
+    assert_eq!(cov.coverage_ratio_bps, 4_166); // 25000 / 60000 * 10000 = 4166 bps
+    assert!(!cov.is_fully_covered);
+}
+
+#[test]
+fn test_withdraw_refund() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(BuildBondEscrowContract, ());
+    let client = BuildBondEscrowContractClient::new(&env, &contract_id);
+
+    let (terms, owner, _, _, _, _, token_client) = create_test_terms(&env, FundingPolicy::Rolling);
+    let milestones = create_test_milestones(&env);
+
+    client.initialize(&terms, &milestones);
+
+    token_client.mint(&owner, &50_000);
+    client.deposit(&owner, &30_000);
+
+    assert_eq!(token_client.balance(&contract_id), 30_000);
+    assert_eq!(token_client.balance(&owner), 20_000);
+
+    // Withdraw 10,000 unallocated refund
+    client.withdraw_refund(&owner, &10_000);
+
+    assert_eq!(token_client.balance(&contract_id), 20_000);
+    assert_eq!(token_client.balance(&owner), 30_000);
+
+    let cov = client.coverage();
+    assert_eq!(cov.unallocated, 20_000);
+
+    // Attempting to withdraw more than unallocated fails
+    let res = client.try_withdraw_refund(&owner, &25_000);
+    assert_eq!(
+        res.err(),
+        Some(Ok(BuildBondError::InsufficientEscrowBalance))
+    );
+}
+
+#[test]
+fn test_unsolicited_token_transfer_does_not_inflate_liabilities() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(BuildBondEscrowContract, ());
+    let client = BuildBondEscrowContractClient::new(&env, &contract_id);
+
+    let (terms, owner, _, _, _, payment_token, token_client) =
+        create_test_terms(&env, FundingPolicy::FullyFunded);
+    let milestones = create_test_milestones(&env);
+
+    client.initialize(&terms, &milestones);
+
+    token_client.mint(&owner, &60_000);
+    client.deposit(&owner, &60_000);
+
+    // Third party sends unsolicited 15,000 tokens directly to contract address
+    let stranger = Address::generate(&env);
+    token_client.mint(&stranger, &15_000);
+    token::Client::new(&env, &payment_token).transfer(&stranger, &contract_id, &15_000);
+
+    // Raw token balance is now 75,000
+    assert_eq!(token_client.balance(&contract_id), 75_000);
+
+    // Contract's accounted deposited/allocated remains exactly 60,000
+    let acct = client.accounting();
+    assert_eq!(acct.deposited, 60_000);
+    assert_eq!(acct.allocated, 60_000);
+
+    let cov = client.coverage();
+    assert_eq!(cov.deposited, 60_000);
+    assert_eq!(cov.allocated, 60_000);
+    assert_eq!(cov.unallocated, 0);
 }
