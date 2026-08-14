@@ -30,6 +30,26 @@ use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, 
 #[contract]
 pub struct BuildBondEscrowContract;
 
+/// Keep every accounting mutation value-conserving and non-negative.
+/// `get_unallocated_funds` also rejects any state where liabilities exceed
+/// accounted deposits, so callers can validate before persisting changes.
+fn validate_accounting(accounting: &Accounting) -> Result<(), BuildBondError> {
+    if accounting.deposited < 0
+        || accounting.committed < 0
+        || accounting.allocated < 0
+        || accounting.contractor_payable < 0
+        || accounting.retainage_locked < 0
+        || accounting.disputed < 0
+        || accounting.owner_refundable < 0
+        || accounting.withdrawn < 0
+    {
+        return Err(BuildBondError::InvalidState);
+    }
+
+    get_unallocated_funds(accounting)?;
+    Ok(())
+}
+
 #[contractimpl]
 impl BuildBondEscrowContract {
     /// Returns the contract version symbol
@@ -235,7 +255,11 @@ impl BuildBondEscrowContract {
             return Err(BuildBondError::InvalidState);
         }
 
+        let terms = get_terms(&env)?;
         caller.require_auth();
+        if caller != terms.owner {
+            return Err(BuildBondError::Unauthorized);
+        }
 
         // Verify contractor, inspector, and arbiter have accepted
         let contractor_acc =
@@ -254,6 +278,30 @@ impl BuildBondEscrowContract {
             get_role_acceptance(&env, Role::Arbiter).ok_or(BuildBondError::RoleNotAccepted)?;
         if !arbiter_acc.accepted {
             return Err(BuildBondError::RoleNotAccepted);
+        }
+
+        let accounting = get_accounting(&env)?;
+        let milestone_count = get_milestone_count(&env);
+        let mut covered_count = 0_u32;
+        for i in 1..=milestone_count {
+            let milestone = get_milestone(&env, i)?;
+            if milestone.status != MilestoneStatus::Planned {
+                covered_count = covered_count
+                    .checked_add(1)
+                    .ok_or(BuildBondError::ArithmeticOverflow)?;
+            }
+        }
+
+        let funding_ready = match terms.funding_policy {
+            FundingPolicy::FullyFunded => {
+                accounting.allocated == terms.total_committed && covered_count == milestone_count
+            }
+            // Rolling projects may start once at least one complete milestone
+            // is covered; later milestones can be funded as work progresses.
+            FundingPolicy::Rolling => accounting.allocated > 0 && covered_count > 0,
+        };
+        if !funding_ready {
+            return Err(BuildBondError::InsufficientCoverage);
         }
 
         set_status(&env, &ProjectStatus::Active);
@@ -320,11 +368,12 @@ impl BuildBondEscrowContract {
                 .checked_mul(10_000)
                 .ok_or(BuildBondError::ArithmeticOverflow)?
                 / terms.total_committed;
-            ratio as u32
+            ratio.min(10_000) as u32
         } else {
             10_000
         };
 
+        validate_accounting(&accounting)?;
         set_accounting(&env, &accounting);
         emit_project_funded(
             &env,
@@ -382,6 +431,7 @@ impl BuildBondEscrowContract {
             .ok_or(BuildBondError::ArithmeticOverflow)?;
 
         set_milestone(&env, milestone_id, &m);
+        validate_accounting(&accounting)?;
         set_accounting(&env, &accounting);
         emit_milestone_funded(&env, milestone_id, amount, env.ledger().timestamp());
 
@@ -407,15 +457,26 @@ impl BuildBondEscrowContract {
 
         let mut accounting = get_accounting(&env)?;
         let unallocated = get_unallocated_funds(&accounting)?;
-        if unallocated < amount {
+        let available = accounting
+            .owner_refundable
+            .checked_add(unallocated)
+            .ok_or(BuildBondError::ArithmeticOverflow)?;
+        if available < amount {
             return Err(BuildBondError::InsufficientEscrowBalance);
         }
+
+        let from_owner_refundable = accounting.owner_refundable.min(amount);
+        accounting.owner_refundable = accounting
+            .owner_refundable
+            .checked_sub(from_owner_refundable)
+            .ok_or(BuildBondError::ArithmeticOverflow)?;
 
         accounting.withdrawn = accounting
             .withdrawn
             .checked_add(amount)
             .ok_or(BuildBondError::ArithmeticOverflow)?;
 
+        validate_accounting(&accounting)?;
         set_accounting(&env, &accounting);
 
         let contract_address = env.current_contract_address();
@@ -553,6 +614,7 @@ impl BuildBondEscrowContract {
                 m.status = MilestoneStatus::InDefectPeriod;
 
                 set_milestone(&env, milestone_id, &m);
+                validate_accounting(&accounting)?;
                 set_accounting(&env, &accounting);
 
                 emit_inspection_recorded(
@@ -612,6 +674,7 @@ impl BuildBondEscrowContract {
             .checked_add(amount)
             .ok_or(BuildBondError::ArithmeticOverflow)?;
 
+        validate_accounting(&accounting)?;
         set_accounting(&env, &accounting);
 
         let contract_address = env.current_contract_address();
@@ -680,6 +743,7 @@ impl BuildBondEscrowContract {
         m.status = MilestoneStatus::Settled;
 
         set_milestone(&env, milestone_id, &m);
+        validate_accounting(&accounting)?;
         set_accounting(&env, &accounting);
 
         let contract_address = env.current_contract_address();
@@ -793,6 +857,7 @@ impl BuildBondEscrowContract {
         };
 
         set_milestone(&env, milestone_id, &m);
+        validate_accounting(&accounting)?;
         set_accounting(&env, &accounting);
         set_dispute(&env, milestone_id, &dispute_record);
 
@@ -878,6 +943,7 @@ impl BuildBondEscrowContract {
         dispute.resolved_at = Some(env.ledger().timestamp());
 
         set_milestone(&env, milestone_id, &m);
+        validate_accounting(&accounting)?;
         set_accounting(&env, &accounting);
         set_dispute(&env, milestone_id, &dispute);
 
@@ -946,7 +1012,7 @@ impl BuildBondEscrowContract {
                 .checked_mul(10_000)
                 .ok_or(BuildBondError::ArithmeticOverflow)?
                 / terms.total_committed;
-            ratio as u32
+            ratio.min(10_000) as u32
         } else {
             10_000
         };
