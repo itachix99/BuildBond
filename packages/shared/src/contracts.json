@@ -4,12 +4,12 @@
     "rpcUrl": "https://soroban-testnet.stellar.org",
     "horizonUrl": "https://horizon-testnet.stellar.org",
     "friendbotUrl": "https://friendbot.stellar.org",
-    "factoryContractId": "",
-    "escrowWasmHash": "",
-    "factoryWasmHash": "",
-    "referenceEscrowContractId": "",
-    "paymentTokenAddress": "",
-    "adminAddress": ""
+    "factoryContractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+    "escrowWasmHash": "14a15e864d6f64eb7238fd81ef59b34dc8c046e54d2470484e3e0f39e81d5ef4",
+    "factoryWasmHash": "19d34e58f76992e0dc8b765fafd487ba38cb6bf68c194c24c86662ada95a56d3",
+    "referenceEscrowContractId": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+    "paymentTokenAddress": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+    "adminAddress": "GAQKMZRIOHN7NOIGNUBNFQ3FY42ZBZAQ4H7EDVKJCUHEE3VK5B5H2XYC"
   },
   "mainnet": {
     "networkPassphrase": "Public Global Stellar Network ; September 2015",
