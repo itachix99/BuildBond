@@ -137,6 +137,8 @@ export interface ProjectDeployedPayload {
   escrowAddress: string;
   owner: string;
   contractor: string;
+  inspector?: string;
+  arbiter?: string;
   totalCommitted: bigint;
   timestamp: bigint;
   salt?: string;
@@ -173,6 +175,8 @@ export interface IndexedProject {
   escrowAddress: string;
   owner: string;
   contractor: string;
+  inspector?: string;
+  arbiter?: string;
   totalCommitted: bigint;
   createdAtLedger: number;
   createdAt: string;

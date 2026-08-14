@@ -17,6 +17,8 @@ import { DisputeCenter } from './components/DisputeCenter';
 import { OpenDisputeModal } from './components/OpenDisputeModal';
 import { ArbitrationModal } from './components/ArbitrationModal';
 import { TransactionAuditDrawer } from './components/TransactionAuditDrawer';
+import { IndexedProjectDirectory } from './components/IndexedProjectDirectory';
+import { useProjectDirectory } from './hooks/useProjectDirectory';
 import { UIDispute, UIMilestone } from './types/escrow';
 
 type TabType = 'milestones' | 'acceptance' | 'funding' | 'payouts' | 'disputes';
@@ -34,6 +36,7 @@ export const App: React.FC = () => {
   const [activeArbitrationDispute, setActiveArbitrationDispute] = useState<UIDispute | null>(null);
 
   const escrow = useEscrowWorkflow(freighter.publicKey);
+  const projectDirectory = useProjectDirectory(escrow.activeAddress);
   const openDisputesCount = Object.values(escrow.project.disputes).filter(d => d.status === 'Open').length;
 
   return (
@@ -99,6 +102,13 @@ export const App: React.FC = () => {
         onSelectProject={escrow.selectProject}
         onOpenCreateModal={() => setIsCreateModalOpen(true)}
         activeAddress={escrow.activeAddress}
+      />
+      <IndexedProjectDirectory
+        projects={projectDirectory.projects}
+        participant={escrow.activeAddress}
+        isLoading={projectDirectory.isLoading}
+        configured={projectDirectory.configured}
+        error={projectDirectory.error}
       />
 
       {/* Active Escrow Project Banner */}

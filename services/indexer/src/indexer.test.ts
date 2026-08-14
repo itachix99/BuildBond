@@ -4,6 +4,7 @@ import { buildMilestoneTimeline, buildProjectAuditTrail, getParticipantEscrowAct
 import { IndexedEvent } from './types.js';
 import { SorobanRpcPoller } from './rpcClient.js';
 import { BuildBondIndexerService } from './service.js';
+import { IndexerApiServer } from './api.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -139,17 +140,35 @@ async function runTests() {
   }
   console.log('✓ Decoded factory project discovery metadata.');
 
+  const rawInspectorAcceptedEvent = {
+    id: 'evt-000-inspector-accepted',
+    type: 'contract',
+    ledger: 1000,
+    ledgerClosedAt: '2026-08-14T09:30:00Z',
+    contractId: contractAddress,
+    txHash: '0xabc122-inspector',
+    topic: ['role_accepted'],
+    value: {
+      role: 2,
+      actor: inspectorAddress,
+      terms_hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+      timestamp: '1700001800',
+    },
+  };
+  const decodedInspectorAccepted = decodeSorobanEvent(rawInspectorAcceptedEvent);
+
   // 2. Storage & Deduplication Tests
   const store = new MemoryEventStore();
   const savedCount = await store.saveEvents([
     decodedProject,
+    decodedInspectorAccepted,
     decodedDeposit,
     decodedSubmit,
     decodedApprove,
     decodedDispute,
   ]);
-  if (savedCount !== 5) {
-    throw new Error(`Expected 5 saved events, got ${savedCount}`);
+  if (savedCount !== 6) {
+    throw new Error(`Expected 6 saved events, got ${savedCount}`);
   }
 
   // Duplicate insert check
@@ -193,15 +212,20 @@ async function runTests() {
     throw new Error('Project discovery read model failed');
   }
   console.log('✓ Project discovery read model returns participant-scoped factory projects.');
+  const inspectorProjects = await store.getProjects({ participant: inspectorAddress });
+  if (inspectorProjects.length !== 1 || inspectorProjects[0].inspector !== inspectorAddress) {
+    throw new Error('Role-aware project discovery did not link inspector acceptance');
+  }
+  console.log('✓ Project discovery links accepted inspector roles for role-aware participant queries.');
 
   // Reopen the durable store to prove events, project discovery, and cursor survive restart.
   const directory = await mkdtemp(join(tmpdir(), 'buildbond-indexer-'));
   const filePath = join(directory, 'events.json');
   const durable = new FileEventStore({ filePath });
-  await durable.saveEvents([decodedProject, decodedDeposit]);
+  await durable.saveEvents([decodedProject, decodedInspectorAccepted, decodedDeposit]);
   await durable.saveCursor({ lastLedger: 1001, lastEventId: decodedDeposit.id, updatedAt: Date.now() });
   const reopened = new FileEventStore({ filePath });
-  if ((await reopened.count()) !== 2) {
+  if ((await reopened.count()) !== 3) {
     throw new Error('Durable event store did not restore events');
   }
   if ((await reopened.getCursor()).lastLedger !== 1001) {
@@ -251,6 +275,55 @@ async function runTests() {
     throw new Error('Indexer confirmation or failed-call filtering failed');
   }
   console.log('✓ Indexer filters failed contract calls and advances only through confirmed ledgers.');
+
+  const api = new IndexerApiServer({ store, port: 0 });
+  const apiAddress = await api.start();
+  const apiBaseUrl = `http://${apiAddress.host}:${apiAddress.port}`;
+  try {
+    const healthResponse = await fetch(`${apiBaseUrl}/health`);
+    const health = await healthResponse.json() as { ok: boolean; eventsCount: number };
+    if (!healthResponse.ok || !health.ok || health.eventsCount !== 6) {
+      throw new Error('Indexer API health endpoint failed');
+    }
+
+    const directoryResponse = await fetch(
+      `${apiBaseUrl}/projects?participant=${encodeURIComponent(ownerAddress)}`
+    );
+    const directory = await directoryResponse.json() as {
+      projects: Array<{ projectId: number; totalCommitted: string }>;
+    };
+    if (!directoryResponse.ok || directory.projects.length !== 1 || directory.projects[0].totalCommitted !== '60000') {
+      throw new Error('Indexer API project directory query failed');
+    }
+
+    const inspectorDirectoryResponse = await fetch(
+      `${apiBaseUrl}/projects?participant=${encodeURIComponent(inspectorAddress)}`
+    );
+    const inspectorDirectory = await inspectorDirectoryResponse.json() as {
+      projects: Array<{ projectId: number; inspector?: string }>;
+    };
+    if (!inspectorDirectoryResponse.ok || inspectorDirectory.projects[0]?.inspector !== inspectorAddress) {
+      throw new Error('Indexer API role-aware project query failed');
+    }
+
+    const eventsResponse = await fetch(
+      `${apiBaseUrl}/events?contractAddress=${encodeURIComponent(contractAddress)}&eventType=milestone_approved`
+    );
+    const eventResult = await eventsResponse.json() as { count: number };
+    if (!eventsResponse.ok || eventResult.count !== 1) {
+      throw new Error('Indexer API event query failed');
+    }
+
+    const auditResponse = await fetch(
+      `${apiBaseUrl}/projects/${encodeURIComponent(decodedProject.contractAddress)}/7/audit`
+    );
+    if (auditResponse.status !== 200) {
+      throw new Error('Indexer API project audit route failed');
+    }
+    console.log('✓ Read-only indexer API serves health, participant projects, filtered events, and audit routes.');
+  } finally {
+    await api.stop();
+  }
 
   console.log('🎉 All @buildbond/indexer Unit & Integration Tests Passed!');
 }

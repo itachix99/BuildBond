@@ -8,6 +8,7 @@ export * from './storage.js';
 export * from './rpcClient.js';
 export * from './service.js';
 export * from './query.js';
+export * from './api.js';
 
 import { DEFAULT_TESTNET_RPC_URL } from '@buildbond/shared';
 import { BuildBondIndexerService } from './service.js';

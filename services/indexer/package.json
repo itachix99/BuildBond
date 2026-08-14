@@ -8,7 +8,8 @@
   "scripts": {
     "build": "tsc",
     "type-check": "tsc --noEmit",
-    "test": "tsx src/indexer.test.ts"
+    "test": "tsx src/indexer.test.ts",
+    "start": "node dist/cli.js"
   },
   "dependencies": {
     "@buildbond/shared": "*",

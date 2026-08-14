@@ -35,7 +35,6 @@ export class MemoryEventStore implements IEventStore {
       if (!this.eventIds.has(eventKey)) {
         this.eventIds.add(eventKey);
         this.events.push(ev);
-        this.indexProject(ev);
         saved++;
       }
     }
@@ -43,6 +42,7 @@ export class MemoryEventStore implements IEventStore {
     this.events.sort(
       (a, b) => a.ledger - b.ledger || a.indexedAt - b.indexedAt || a.id.localeCompare(b.id)
     );
+    this.rebuildProjects();
     return saved;
   }
 
@@ -92,7 +92,9 @@ export class MemoryEventStore implements IEventStore {
       projects = projects.filter(
         project =>
           project.owner.toLowerCase() === participant ||
-          project.contractor.toLowerCase() === participant
+          project.contractor.toLowerCase() === participant ||
+          project.inspector?.toLowerCase() === participant ||
+          project.arbiter?.toLowerCase() === participant
       );
     }
     projects.sort((a, b) => a.createdAtLedger - b.createdAtLedger || a.projectId - b.projectId);
@@ -172,29 +174,49 @@ export class MemoryEventStore implements IEventStore {
         project,
       ])
     );
-    if (this.projects.size === 0) {
-      for (const event of this.events) this.indexProject(event);
-    }
+    this.rebuildProjects();
     this.cursor = snapshot.cursor || { lastLedger: 0, updatedAt: Date.now() };
   }
 
   private indexProject(event: IndexedEvent): void {
-    if (event.eventType !== 'project_deployed') return;
-    const payload = event.payload;
-    if (!payload?.projectId || !payload.escrowAddress) return;
-    const project: IndexedProject = {
-      projectId: payload.projectId,
-      factoryAddress: event.contractAddress,
-      escrowAddress: payload.escrowAddress,
-      owner: payload.owner || '',
-      contractor: payload.contractor || '',
-      totalCommitted: BigInt(payload.totalCommitted || 0),
-      createdAtLedger: event.ledger,
-      createdAt: event.ledgerClosedAt,
-      salt: payload.salt,
-      escrowWasmHash: payload.escrowWasmHash,
-    };
-    this.projects.set(`${event.contractAddress.toLowerCase()}:${project.projectId}`, project);
+    if (event.eventType === 'project_deployed') {
+      const payload = event.payload;
+      if (payload?.projectId === undefined || !payload.escrowAddress) return;
+      const project: IndexedProject = {
+        projectId: payload.projectId,
+        factoryAddress: event.contractAddress,
+        escrowAddress: payload.escrowAddress,
+        owner: payload.owner || '',
+        contractor: payload.contractor || '',
+        totalCommitted: BigInt(payload.totalCommitted || 0),
+        createdAtLedger: event.ledger,
+        createdAt: event.ledgerClosedAt,
+        salt: payload.salt,
+        escrowWasmHash: payload.escrowWasmHash,
+      };
+      this.projects.set(`${event.contractAddress.toLowerCase()}:${project.projectId}`, project);
+      return;
+    }
+
+    if (event.eventType !== 'role_accepted') return;
+    const project = [...this.projects.values()].find(
+      candidate => candidate.escrowAddress.toLowerCase() === event.contractAddress.toLowerCase()
+    );
+    if (!project || !event.payload?.actor) return;
+    if (event.payload.role === 2) project.inspector = event.payload.actor;
+    if (event.payload.role === 3) project.arbiter = event.payload.actor;
+  }
+
+  private rebuildProjects(): void {
+    this.projects.clear();
+    // Replays can contain same-ledger events in either order. Build the
+    // deployment base first, then attach accepted roles deterministically.
+    for (const event of this.events) {
+      if (event.eventType === 'project_deployed') this.indexProject(event);
+    }
+    for (const event of this.events) {
+      if (event.eventType === 'role_accepted') this.indexProject(event);
+    }
   }
 }
 

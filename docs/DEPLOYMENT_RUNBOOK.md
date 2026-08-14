@@ -115,7 +115,9 @@ npm run build
 INDEXER_POLL_INTERVAL_MS=5000 \
 INDEXER_CONFIRMATION_LEDGERS=2 \
 INDEXER_STORAGE_PATH=/var/lib/buildbond/indexer/events.json \
-npx tsx src/index.ts
+INDEXER_API_HOST=127.0.0.1 \
+INDEXER_API_PORT=8787 \
+npm start
 ```
 
 The indexer will continuously:
@@ -124,6 +126,18 @@ The indexer will continuously:
 3. Ignore events from failed contract calls and wait for the configured confirmation depth.
 4. Decode milestone submissions, inspection approvals, retainage claims, arbitration awards, and factory project deployments.
 5. Atomically persist the event log, project discovery directory, and cursor to `INDEXER_STORAGE_PATH`.
+
+The read-only API exposes:
+
+- `GET /health` for cursor and event-store health;
+- `GET /projects?participant=<address>` for participant-scoped project discovery;
+- `GET /projects/<factory>/<projectId>/audit` for a financial audit trail;
+- `GET /projects/<factory>/<projectId>/milestones/<milestoneId>` for a milestone timeline;
+- `GET /events?contractAddress=<address>` for filtered activity.
+
+All token amounts are returned as decimal strings. The API has no write or transaction-authorizing
+routes. To connect the web dashboard to it, set `VITE_INDEXER_API_URL=http://127.0.0.1:8787` before
+starting `@buildbond/web`; without that variable the local simulator remains the only project source.
 
 The indexer is a convenience read model, not payment authority. Security-sensitive screens must
 reconcile balances and lifecycle state against direct contract reads. Use a durable filesystem
