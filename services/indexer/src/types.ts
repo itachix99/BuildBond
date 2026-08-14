@@ -7,6 +7,7 @@ export type BuildBondEventType =
   | 'role_accepted'
   | 'role_declined'
   | 'project_activated'
+  | 'project_completed'
   | 'project_funded'
   | 'milestone_funded'
   | 'milestone_submitted'
@@ -51,6 +52,10 @@ export interface RoleDeclinedPayload {
 
 export interface ProjectActivatedPayload {
   caller: string;
+  timestamp: bigint;
+}
+
+export interface ProjectCompletedPayload {
   timestamp: bigint;
 }
 
@@ -134,6 +139,8 @@ export interface ProjectDeployedPayload {
   contractor: string;
   totalCommitted: bigint;
   timestamp: bigint;
+  salt?: string;
+  escrowWasmHash?: string;
 }
 
 export interface WasmHashUpdatedPayload {
@@ -158,6 +165,26 @@ export interface IndexerCursor {
   lastLedger: number;
   lastEventId?: string;
   updatedAt: number;
+}
+
+export interface IndexedProject {
+  projectId: number;
+  factoryAddress: string;
+  escrowAddress: string;
+  owner: string;
+  contractor: string;
+  totalCommitted: bigint;
+  createdAtLedger: number;
+  createdAt: string;
+  salt?: string;
+  escrowWasmHash?: string;
+}
+
+export interface ProjectQueryOptions {
+  participant?: string;
+  limit?: number;
+  offset?: number;
+  order?: 'asc' | 'desc';
 }
 
 export interface QueryOptions {

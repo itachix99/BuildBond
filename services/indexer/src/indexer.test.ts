@@ -1,7 +1,12 @@
 import { decodeSorobanEvent } from './eventDecoder.js';
-import { MemoryEventStore } from './storage.js';
+import { FileEventStore, MemoryEventStore } from './storage.js';
 import { buildMilestoneTimeline, buildProjectAuditTrail, getParticipantEscrowActivity } from './query.js';
 import { IndexedEvent } from './types.js';
+import { SorobanRpcPoller } from './rpcClient.js';
+import { BuildBondIndexerService } from './service.js';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 async function runTests() {
   console.log('Running @buildbond/indexer Service & Event Processing Unit Tests...');
@@ -105,11 +110,46 @@ async function runTests() {
   }
   console.log('✓ Decoded dispute_resolved event with binding arbiter award split.');
 
+  const rawProjectDeployedEvent = {
+    id: 'evt-000-project-deployed',
+    type: 'contract',
+    ledger: 999,
+    ledgerClosedAt: '2026-08-14T09:00:00Z',
+    contractId: 'CCBUILDBONDFACTORY7Y3VDFG574TNDV62B6IQP7Y6YJ6B3EBRT4E3X74P4X5P7X111',
+    txHash: '0xabc122',
+    topic: ['project_deployed'],
+    value: {
+      project_id: 7,
+      escrow_address: contractAddress,
+      owner: ownerAddress,
+      contractor: contractorAddress,
+      total_committed: '60000',
+      timestamp: '1700000000',
+      salt: 'ab'.repeat(32),
+      escrow_wasm_hash: 'cd'.repeat(32),
+    },
+  };
+  const decodedProject = decodeSorobanEvent(rawProjectDeployedEvent);
+  if (
+    decodedProject.eventType !== 'project_deployed' ||
+    decodedProject.payload.projectId !== 7 ||
+    decodedProject.payload.salt !== 'ab'.repeat(32)
+  ) {
+    throw new Error('Failed to decode project discovery metadata');
+  }
+  console.log('✓ Decoded factory project discovery metadata.');
+
   // 2. Storage & Deduplication Tests
   const store = new MemoryEventStore();
-  const savedCount = await store.saveEvents([decodedDeposit, decodedSubmit, decodedApprove, decodedDispute]);
-  if (savedCount !== 4) {
-    throw new Error(`Expected 4 saved events, got ${savedCount}`);
+  const savedCount = await store.saveEvents([
+    decodedProject,
+    decodedDeposit,
+    decodedSubmit,
+    decodedApprove,
+    decodedDispute,
+  ]);
+  if (savedCount !== 5) {
+    throw new Error(`Expected 5 saved events, got ${savedCount}`);
   }
 
   // Duplicate insert check
@@ -147,6 +187,70 @@ async function runTests() {
     throw new Error('Cursor persistence failed');
   }
   console.log('✓ Indexer cursor saved and retrieved accurately at ledger 1020.');
+
+  const projects = await store.getProjects({ participant: ownerAddress });
+  if (projects.length !== 1 || projects[0].projectId !== 7) {
+    throw new Error('Project discovery read model failed');
+  }
+  console.log('✓ Project discovery read model returns participant-scoped factory projects.');
+
+  // Reopen the durable store to prove events, project discovery, and cursor survive restart.
+  const directory = await mkdtemp(join(tmpdir(), 'buildbond-indexer-'));
+  const filePath = join(directory, 'events.json');
+  const durable = new FileEventStore({ filePath });
+  await durable.saveEvents([decodedProject, decodedDeposit]);
+  await durable.saveCursor({ lastLedger: 1001, lastEventId: decodedDeposit.id, updatedAt: Date.now() });
+  const reopened = new FileEventStore({ filePath });
+  if ((await reopened.count()) !== 2) {
+    throw new Error('Durable event store did not restore events');
+  }
+  if ((await reopened.getCursor()).lastLedger !== 1001) {
+    throw new Error('Durable event store did not restore cursor');
+  }
+  if ((await reopened.getProjects())[0]?.escrowAddress !== contractAddress) {
+    throw new Error('Durable event store did not restore project directory');
+  }
+  await rm(directory, { recursive: true, force: true });
+  console.log('✓ Durable event store restores events, project directory, and cursor after restart.');
+
+  const pagedPoller = new SorobanRpcPoller({ rpcUrl: 'https://example.com', batchSize: 2 });
+  const pageRequests: any[] = [];
+  (pagedPoller as any).server = {
+    getEvents: async (request: any) => {
+      pageRequests.push(request);
+      if (!request.cursor) {
+        return {
+          events: [rawDepositEvent, rawSubmitEvent],
+          cursor: 'cursor-1',
+        };
+      }
+      return { events: [rawApproveEvent], cursor: 'cursor-2' };
+    },
+  };
+  const pagedEvents = await pagedPoller.fetchEvents(1000, 1010);
+  if (pagedEvents.length !== 3 || !pageRequests[1].cursor || pageRequests[1].startLedger) {
+    throw new Error('RPC event pagination failed to follow the returned cursor');
+  }
+  console.log('✓ RPC event pagination follows cursors without skipping full pages.');
+
+  const serviceStore = new MemoryEventStore();
+  const service = new BuildBondIndexerService({
+    rpcUrl: 'https://example.com',
+    store: serviceStore,
+    confirmationLedgers: 2,
+  });
+  (service as any).poller = {
+    getLatestLedger: async () => 100,
+    fetchEvents: async () => [
+      { ...rawDepositEvent, id: 'successful', inSuccessfulContractCall: true, ledger: 90 },
+      { ...rawSubmitEvent, id: 'failed', inSuccessfulContractCall: false, ledger: 91 },
+    ],
+  };
+  await service.pollOnce();
+  if ((await serviceStore.count()) !== 1 || (await serviceStore.getCursor()).lastLedger !== 98) {
+    throw new Error('Indexer confirmation or failed-call filtering failed');
+  }
+  console.log('✓ Indexer filters failed contract calls and advances only through confirmed ledgers.');
 
   console.log('🎉 All @buildbond/indexer Unit & Integration Tests Passed!');
 }

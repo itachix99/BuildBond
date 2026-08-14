@@ -112,13 +112,23 @@ To run the real-time Soroban RPC event indexer daemon in the background:
 ```bash
 cd services/indexer
 npm run build
-INDEXER_POLL_INTERVAL_MS=5000 npx tsx src/index.ts
+INDEXER_POLL_INTERVAL_MS=5000 \
+INDEXER_CONFIRMATION_LEDGERS=2 \
+INDEXER_STORAGE_PATH=/var/lib/buildbond/indexer/events.json \
+npx tsx src/index.ts
 ```
 
 The indexer will continuously:
 1. Poll new ledgers from Soroban RPC.
-2. Decode milestone submissions, inspection approvals, retainage claims, and arbitration awards.
-3. Populate the normalized event store.
+2. Follow RPC event cursors so pages larger than the request limit are not skipped.
+3. Ignore events from failed contract calls and wait for the configured confirmation depth.
+4. Decode milestone submissions, inspection approvals, retainage claims, arbitration awards, and factory project deployments.
+5. Atomically persist the event log, project discovery directory, and cursor to `INDEXER_STORAGE_PATH`.
+
+The indexer is a convenience read model, not payment authority. Security-sensitive screens must
+reconcile balances and lifecycle state against direct contract reads. Use a durable filesystem
+path or replace `FileEventStore` with a transactional database adapter for multi-process or
+high-availability deployments. The default storage path is `.buildbond-indexer/events.json`.
 
 ---
 

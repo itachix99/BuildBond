@@ -82,6 +82,8 @@ function mapEventNameToType(eventName: string): BuildBondEventType {
       return 'role_declined';
     case 'project_activated':
       return 'project_activated';
+    case 'project_completed':
+      return 'project_completed';
     case 'project_funded':
       return 'project_funded';
     case 'milestone_funded':
@@ -152,6 +154,11 @@ function parseEventPayload(type: BuildBondEventType, val: any, topics: any[]): a
     case 'project_activated':
       return {
         caller: val.caller || '',
+        timestamp: BigInt(val.timestamp || 0),
+      };
+
+    case 'project_completed':
+      return {
         timestamp: BigInt(val.timestamp || 0),
       };
 
@@ -246,6 +253,8 @@ function parseEventPayload(type: BuildBondEventType, val: any, topics: any[]): a
         contractor: val.contractor || '',
         totalCommitted: BigInt(val.total_committed || 0),
         timestamp: BigInt(val.timestamp || 0),
+        salt: val.salt ? toHex(val.salt) : undefined,
+        escrowWasmHash: val.escrow_wasm_hash ? toHex(val.escrow_wasm_hash) : undefined,
       };
 
     case 'wasm_hash_updated':

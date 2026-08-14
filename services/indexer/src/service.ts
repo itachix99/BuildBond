@@ -6,6 +6,7 @@ export interface IndexerServiceOptions extends RpcPollerOptions {
   store?: IEventStore;
   pollIntervalMs?: number;
   startLedger?: number;
+  confirmationLedgers?: number;
 }
 
 export class BuildBondIndexerService {
@@ -14,18 +15,15 @@ export class BuildBondIndexerService {
   private pollIntervalMs: number;
   private isRunning: boolean = false;
   private timer: any = null;
+  private confirmationLedgers: number;
+  private startLedger?: number;
 
   constructor(options: IndexerServiceOptions) {
     this.poller = new SorobanRpcPoller(options);
     this.store = options.store || new MemoryEventStore();
     this.pollIntervalMs = options.pollIntervalMs || 5000;
-
-    if (options.startLedger !== undefined) {
-      this.store.saveCursor({
-        lastLedger: options.startLedger,
-        updatedAt: Date.now(),
-      });
-    }
+    this.confirmationLedgers = Math.max(0, options.confirmationLedgers || 0);
+    this.startLedger = options.startLedger;
   }
 
   getStore(): IEventStore {
@@ -33,8 +31,13 @@ export class BuildBondIndexerService {
   }
 
   async pollOnce(): Promise<number> {
-    const cursor = await this.store.getCursor();
-    const latestLedger = await this.poller.getLatestLedger();
+    let cursor = await this.store.getCursor();
+    if (this.startLedger !== undefined && cursor.lastLedger === 0) {
+      await this.store.saveCursor({ lastLedger: this.startLedger, updatedAt: Date.now() });
+      cursor = await this.store.getCursor();
+    }
+    const networkLatestLedger = await this.poller.getLatestLedger();
+    const latestLedger = Math.max(0, networkLatestLedger - this.confirmationLedgers);
 
     if (latestLedger <= cursor.lastLedger) {
       return 0;
@@ -43,7 +46,9 @@ export class BuildBondIndexerService {
     const fromLedger = cursor.lastLedger > 0 ? cursor.lastLedger + 1 : Math.max(1, latestLedger - 100);
     const rawEvents = await this.poller.fetchEvents(fromLedger, latestLedger);
 
-    const indexedEvents = rawEvents.map(decodeSorobanEvent);
+    const indexedEvents = rawEvents
+      .filter(event => event.inSuccessfulContractCall !== false)
+      .map(decodeSorobanEvent);
     const savedCount = await this.store.saveEvents(indexedEvents);
 
     const maxProcessedLedger = rawEvents.reduce(
