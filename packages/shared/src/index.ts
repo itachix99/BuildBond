@@ -2,6 +2,8 @@
  * Shared constants and types for BuildBond
  */
 
+export * from './config.js';
+
 export enum ProjectStatus {
   Draft = 'Draft',
   AwaitingAcceptance = 'AwaitingAcceptance',

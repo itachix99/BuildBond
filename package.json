@@ -14,6 +14,11 @@
     "test": "npm run test --workspaces --if-present",
     "check:cargo": "cargo fmt --all --check && cargo clippy --all-targets -- -D warnings && cargo test --all",
     "build:contract": "stellar contract build",
+    "fund:testnet": "tsx scripts/fund-testnet-account.ts",
+    "deploy:testnet": "tsx scripts/deploy-contracts.ts testnet",
+    "deploy:mainnet": "tsx scripts/deploy-contracts.ts mainnet",
+    "verify:deployment": "tsx scripts/verify-deployment.ts",
+    "verify:testnet": "tsx scripts/verify-deployment.ts testnet",
     "check": "npm run type-check && npm run test && npm run check:cargo && npm run build"
   },
   "devDependencies": {
