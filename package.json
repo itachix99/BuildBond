@@ -17,6 +17,7 @@
     "check": "npm run type-check && npm run test && npm run check:cargo && npm run build"
   },
   "devDependencies": {
+    "tsx": "^4.23.12",
     "typescript": "^5.7.3"
   }
 }
