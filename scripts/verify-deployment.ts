@@ -8,11 +8,32 @@
 
 import { rpc, StrKey } from '@stellar/stellar-sdk';
 import crypto from 'node:crypto';
-import { getNetworkConfig, buildStellarExpertContractUrl } from '@buildbond/shared';
+import {
+  getNetworkConfig,
+  buildStellarExpertContractUrl,
+  manifestToNetworkConfig,
+  validateDeploymentManifest,
+  type DeploymentManifest,
+  type NetworkEnvironment,
+} from '@buildbond/shared';
+import { readDeploymentManifest, writeDeploymentManifest } from './deployment-manifest.js';
 
-export async function verifyDeployment(networkArg?: string) {
-  const network = (networkArg || 'testnet') as 'testnet' | 'mainnet' | 'local';
-  const config = getNetworkConfig(network);
+export async function verifyDeployment(
+  networkArg?: string,
+  manifestPath?: string,
+  promotePath?: string,
+) {
+  const network = (networkArg || 'testnet') as NetworkEnvironment;
+  let manifest: DeploymentManifest | undefined;
+  if (manifestPath) {
+    const rawManifest = readDeploymentManifest(manifestPath);
+    const validation = validateDeploymentManifest(rawManifest, network, { requireVerified: false });
+    if (!validation.valid) {
+      throw new Error(`Deployment manifest is invalid:\n${validation.errors.map(error => `- ${error}`).join('\n')}`);
+    }
+    manifest = rawManifest as DeploymentManifest;
+  }
+  const config = manifest ? manifestToNetworkConfig(manifest) : getNetworkConfig(network);
 
   console.log('====================================================');
   console.log(` BuildBond Deployment Verification [${network.toUpperCase()}]`);
@@ -21,6 +42,10 @@ export async function verifyDeployment(networkArg?: string) {
   console.log(`Network:            ${network}`);
   console.log(`RPC Endpoint:       ${config.rpcUrl}`);
   console.log(`Network Passphrase: "${config.networkPassphrase}"\n`);
+  if (manifest) {
+    console.log(`Manifest:            ${manifestPath}`);
+    console.log(`Manifest Status:     ${manifest.status}\n`);
+  }
 
   const checks: Record<string, string> = {};
   const failures: string[] = [];
@@ -66,7 +91,7 @@ export async function verifyDeployment(networkArg?: string) {
     try {
       const wasm = await rpcServer.getContractWasmByContractId(contractId);
       const actualHash = crypto.createHash('sha256').update(wasm).digest('hex');
-      if (actualHash !== expectedHash) {
+      if (actualHash !== expectedHash.toLowerCase()) {
         failures.push(`${label} WASM hash mismatch: expected ${expectedHash}, got ${actualHash}.`);
         console.error(`✗ ${label} WASM hash mismatch.`);
       } else {
@@ -133,12 +158,30 @@ export async function verifyDeployment(networkArg?: string) {
     throw new Error('Configured deployment metadata is incomplete or invalid; no live deployment was established.');
   }
 
-  console.log('✓ Deployment metadata passed local format validation. Live on-chain existence and bytecode checks still require RPC verification.');
+  if (manifest?.status === 'candidate' && promotePath) {
+    const verifiedManifest: DeploymentManifest = {
+      ...manifest,
+      status: 'verified',
+      verifiedAt: new Date().toISOString(),
+    };
+    const writtenPath = writeDeploymentManifest(promotePath, verifiedManifest);
+    console.log(`✓ On-chain checks passed; wrote verified manifest to ${writtenPath}`);
+  } else if (manifest?.status === 'candidate') {
+    console.log('✓ On-chain checks passed for the candidate manifest. Re-run with --write-verified=/path/to/manifest.json to persist verified status.');
+  } else {
+    console.log('✓ Deployment metadata and on-chain WASM checks passed.');
+  }
 }
 
 async function main() {
-  const networkArg = process.argv[2]?.replace('--network=', '') || 'testnet';
-  await verifyDeployment(networkArg);
+  const args = process.argv.slice(2);
+  const networkArg = args.find(value => !value.startsWith('--'))
+    || args.find(value => value.startsWith('--network='))?.slice('--network='.length)
+    || 'testnet';
+  const manifestPath = args.find(value => value.startsWith('--manifest='))?.slice('--manifest='.length)
+    || process.env.BUILDBOND_DEPLOYMENT_MANIFEST;
+  const promotePath = args.find(value => value.startsWith('--write-verified='))?.slice('--write-verified='.length);
+  await verifyDeployment(networkArg, manifestPath, promotePath);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

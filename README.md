@@ -84,6 +84,7 @@ npm run check
 | **Web Frontend Tests** | Canonical SHA-256 terms hashing, evidence digests, retainage math, and error diagnostic decoders (1..37) | `npm run test --workspace=@buildbond/web` |
 | **Event Indexer Tests** | SCVal XDR event decoding, deduplication, participant queries, timeline aggregations, and cursor persistence | `npm run test --workspace=@buildbond/indexer` |
 | **Deployment Metadata Verification** | RPC reachability plus strict format validation for supplied IDs/hashes; fails when metadata is absent | `npm run verify:deployment` |
+| **Deployment Manifest Tests** | Offline candidate/verified state, network, timestamp, URL, address-shape, and hash validation | `npm run test:manifest` |
 
 ---
 
@@ -114,7 +115,11 @@ dashboard's escrow workflow is a local simulation and does not create, fund, or
 settle Soroban contracts. `scripts/deploy-contracts.ts` currently builds WASM
 and records operator-supplied metadata only; it refuses to invent IDs and
 Mainnet is disabled. The separate Direct XLM Pay flow is the only live Testnet
-transaction path currently enabled.
+transaction path currently enabled. Deployment metadata is carried in a
+candidate/verified manifest; the web app and indexer consume only a manifest
+that passed the RPC bytecode checks. See
+[`docs/DEPLOYMENT_RUNBOOK.md`](docs/DEPLOYMENT_RUNBOOK.md) for the promotion
+and offline validation commands.
 
 ---
 

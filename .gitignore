@@ -16,6 +16,10 @@ node_modules/
 *.key
 *.secret
 
+# Deployment manifests are generated from operator-supplied IDs and verified
+# per environment; keep local candidates/verified copies out of source control.
+deployments/*.manifest*.json
+
 # Local Databases & Logs
 *.sqlite
 *.sqlite-journal

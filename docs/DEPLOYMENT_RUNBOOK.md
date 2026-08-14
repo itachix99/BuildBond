@@ -83,7 +83,10 @@ npm run deploy:testnet
 
 The script validates Stellar StrKey formats before writing public metadata to
 `packages/shared/src/contracts.json` and `.env.contracts`. A successful local
-format check is not proof that a contract exists on-chain.
+format check is not proof that a contract exists on-chain. It also writes a
+candidate manifest to `deployments/testnet.manifest.json`; candidate manifests
+are intentionally rejected by the web app and indexer until RPC verification
+promotes one to `status: "verified"`.
 
 ---
 
@@ -92,7 +95,14 @@ format check is not proof that a contract exists on-chain.
 Verify on-chain deployment status and RPC reachability:
 
 ```bash
-npm run verify:deployment
+# Verify the candidate and persist a verified manifest only after all RPC checks pass.
+npm run verify:deployment -- testnet \
+  --manifest=deployments/testnet.manifest.json \
+  --write-verified=deployments/testnet.manifest.verified.json
+
+# Offline validation (no RPC calls or transactions)
+npm run validate:manifest -- \
+  --file=deployments/testnet.manifest.verified.json --network=testnet
 ```
 
 The verifier fails closed unless all required values are present and valid. When
@@ -102,6 +112,11 @@ from Soroban RPC and compares the on-chain SHA-256 hash:
 - `Escrow WASM`: Valid SHA-256 hash (64 hex characters)
 - `Factory WASM`: Valid SHA-256 hash (64 hex characters)
 - `Factory ID`: Valid Stellar contract ID with on-chain WASM verification
+
+If no manifest is supplied, `npm run verify:deployment` retains the legacy
+environment-variable path and fails closed when metadata is absent. Never mark
+a manifest verified by hand: the verifier is the step that records the
+`verifiedAt` timestamp after matching both on-chain WASM hashes.
 
 ---
 
@@ -117,8 +132,14 @@ INDEXER_CONFIRMATION_LEDGERS=2 \
 INDEXER_STORAGE_PATH=/var/lib/buildbond/indexer/events.json \
 INDEXER_API_HOST=127.0.0.1 \
 INDEXER_API_PORT=8787 \
+BUILDBOND_DEPLOYMENT_MANIFEST=/etc/buildbond/testnet.manifest.verified.json \
 npm start
 ```
+
+When `BUILDBOND_DEPLOYMENT_MANIFEST` is set, the indexer refuses to start
+unless the file is a verified manifest and derives its RPC endpoint and factory
+contract IDs from that file. This prevents an indexer from silently following
+a different network than the dashboard.
 
 The indexer will continuously:
 1. Poll new ledgers from Soroban RPC.
@@ -140,8 +161,10 @@ routes. To connect the web dashboard to it, set `VITE_INDEXER_API_URL=http://127
 starting `@buildbond/web`; without that variable the local simulator remains the only project source.
 
 When an indexed project is selected, the dashboard lazy-loads the generated escrow bindings and
-reads `project`, `accounting`, and `coverage` directly from Soroban RPC. Set
-`VITE_STELLAR_RPC_URL` when using a non-default RPC endpoint. The dashboard compares the direct
+reads `project`, `accounting`, and `coverage` directly from Soroban RPC. For a verified deployment,
+embed the manifest JSON at build time with `VITE_BUILD_BOND_DEPLOYMENT_MANIFEST_JSON` (and set
+`VITE_BUILD_BOND_NETWORK`); the dashboard then takes its RPC and indexer endpoints from that
+manifest. `VITE_STELLAR_RPC_URL` and `VITE_INDEXER_API_URL` remain development fallbacks. The dashboard compares the direct
 commitment with the indexed commitment and surfaces mismatches; it never uses the indexer to
 authorize payments or silently overwrite the simulator.
 

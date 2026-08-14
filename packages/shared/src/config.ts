@@ -1,4 +1,5 @@
 import contractsData from './contracts.json' with { type: 'json' };
+import { manifestToNetworkConfig, validateDeploymentManifest } from './deploymentManifest.js';
 
 export type NetworkEnvironment = 'testnet' | 'mainnet' | 'local';
 
@@ -17,6 +18,20 @@ export interface NetworkConfig {
 
 export function getNetworkConfig(network: NetworkEnvironment = 'testnet'): NetworkConfig {
   const env = (process.env.BUILD_BOND_NETWORK || process.env.VITE_BUILD_BOND_NETWORK || network) as NetworkEnvironment;
+  const inlineManifest = process.env.BUILD_BOND_DEPLOYMENT_MANIFEST_JSON || process.env.VITE_BUILD_BOND_DEPLOYMENT_MANIFEST_JSON;
+  if (inlineManifest) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(inlineManifest);
+    } catch (error: any) {
+      throw new Error(`Configured deployment manifest JSON is invalid: ${error?.message || error}`);
+    }
+    const validation = validateDeploymentManifest(parsed, env, { requireVerified: true });
+    if (!validation.valid) {
+      throw new Error(`Configured deployment manifest is not verified:\n${validation.errors.map(error => `- ${error}`).join('\n')}`);
+    }
+    return manifestToNetworkConfig(parsed as Parameters<typeof manifestToNetworkConfig>[0]);
+  }
   const config = contractsData[env] || contractsData.testnet;
 
   return {

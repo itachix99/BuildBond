@@ -3,6 +3,7 @@
  */
 
 export * from './config.js';
+export * from './deploymentManifest.js';
 
 export enum ProjectStatus {
   Draft = 'Draft',

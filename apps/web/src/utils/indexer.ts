@@ -1,3 +1,5 @@
+import { getBrowserIndexerUrl } from './deployment';
+
 export interface IndexedProjectSummary {
   projectId: number;
   factoryAddress: string;
@@ -47,9 +49,7 @@ interface ProjectDirectoryResponse {
 }
 
 function configuredIndexerUrl(): string | null {
-  const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
-  const value = env?.VITE_INDEXER_API_URL?.trim();
-  return value ? value.replace(/\/$/, '') : null;
+  return getBrowserIndexerUrl();
 }
 
 export async function fetchIndexedProjects(

@@ -13,6 +13,8 @@ import crypto from 'crypto';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { StrKey } from '@stellar/stellar-sdk';
+import type { DeploymentManifest } from '@buildbond/shared';
+import { manifestPathForNetwork, writeDeploymentManifest } from './deployment-manifest.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -134,6 +136,31 @@ export async function deployContracts(network: 'testnet' | 'mainnet' | 'local' =
     deployedAt: new Date().toISOString(),
   };
 
+  // A candidate manifest records the exact build and operator-supplied IDs,
+  // but is deliberately not consumable by the web/indexer until the verifier
+  // confirms the IDs and bytecode against Soroban RPC.
+  const candidateManifest: DeploymentManifest = {
+    manifestVersion: 1,
+    status: 'candidate',
+    network,
+    networkPassphrase,
+    rpcUrl,
+    horizonUrl: network === 'mainnet' ? 'https://horizon.stellar.org' : 'https://horizon-testnet.stellar.org',
+    factoryContractId,
+    referenceEscrowContractId,
+    escrowWasmHash,
+    factoryWasmHash,
+    paymentTokenAddress,
+    adminAddress,
+    deployedAt: result.deployedAt,
+    ...(process.env.BUILDBOND_INDEXER_URL ? { indexerUrl: process.env.BUILDBOND_INDEXER_URL } : {}),
+  };
+  const manifestPath = writeDeploymentManifest(
+    process.env.BUILDBOND_DEPLOYMENT_MANIFEST_OUTPUT || manifestPathForNetwork(network),
+    candidateManifest,
+  );
+  console.log(`✓ Wrote candidate deployment manifest: ${manifestPath}`);
+
   // 4. Update packages/shared/src/contracts.json
   const contractsJsonPath = path.join(ROOT_DIR, 'packages/shared/src/contracts.json');
   let currentContracts: any = {};
@@ -181,7 +208,7 @@ BUILD_BOND_ADMIN_ADDRESS=${adminAddress}
   console.log(`✓ Generated ${envContractsPath}\n`);
 
   console.log('====================================================');
-  console.log(' Verified Configuration Recorded (deployment must be verified separately):');
+  console.log(' Candidate Configuration Recorded (verify against RPC before consumption):');
   console.log('====================================================');
   console.table({
     Network: network,

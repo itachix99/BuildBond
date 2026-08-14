@@ -1,5 +1,6 @@
 import { StrKey } from '@stellar/stellar-sdk';
-import { DEFAULT_TESTNET_RPC_URL, NETWORK_PASSPHRASE_TESTNET } from '@buildbond/shared';
+import { NETWORK_PASSPHRASE_TESTNET } from '@buildbond/shared';
+import { getBrowserRpcUrl } from './deployment';
 
 interface RustResult<T> {
   isOk(): boolean;
@@ -47,8 +48,7 @@ export interface ReconciledEscrowState {
 }
 
 function configuredRpcUrl(): string {
-  const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
-  return env?.VITE_STELLAR_RPC_URL?.trim() || DEFAULT_TESTNET_RPC_URL;
+  return getBrowserRpcUrl();
 }
 
 function bytesToHex(value: unknown): string {

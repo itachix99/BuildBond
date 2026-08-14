@@ -19,6 +19,8 @@
     "deploy:mainnet": "tsx scripts/deploy-contracts.ts mainnet",
     "verify:deployment": "tsx scripts/verify-deployment.ts",
     "verify:testnet": "tsx scripts/verify-deployment.ts testnet",
+    "validate:manifest": "tsx scripts/validate-deployment-manifest.ts",
+    "test:manifest": "tsx scripts/deployment-manifest.test.ts",
     "check": "npm run type-check && npm run test && npm run check:cargo && npm run build"
   },
   "devDependencies": {
