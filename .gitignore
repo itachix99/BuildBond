@@ -1,0 +1,34 @@
+# Build & Target Directories
+target/
+dist/
+build/
+.turbo/
+.next/
+
+# Dependencies
+node_modules/
+
+# Environment & Secrets (NEVER COMMIT SECRETS)
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.secret
+
+# Local Databases & Logs
+*.sqlite
+*.sqlite-journal
+*.db
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# OS & Editor files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+.cursor/

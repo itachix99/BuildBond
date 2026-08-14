@@ -1,0 +1,57 @@
+name: BuildBond CI
+
+on:
+  push:
+    branches: [ main, "feature/**" ]
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust-checks:
+    name: Rust Contract Checks & Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+          components: clippy, rustfmt
+
+      - name: Rustfmt Check
+        run: cargo fmt --all --check
+
+      - name: Clippy Lint
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Contract Unit Tests
+        run: cargo test --all
+
+      - name: Build Contract WASM
+        run: cargo build --target wasm32v1-none --release
+
+  typescript-checks:
+    name: TypeScript & Frontend Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Type Check Workspaces
+        run: npm run type-check
+
+      - name: Build Web & Packages
+        run: npm run build

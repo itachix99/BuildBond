@@ -1,0 +1,22 @@
+{
+  "name": "buildbond-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "build:shared": "npm run build --workspace=@buildbond/shared",
+    "build": "npm run build:shared && npm run build --workspaces --if-present",
+    "type-check": "npm run build:shared && npm run type-check --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "check:cargo": "cargo fmt --all --check && cargo clippy --all-targets -- -D warnings && cargo test --all",
+    "build:contract": "stellar contract build",
+    "check": "npm run type-check && npm run test && npm run check:cargo && npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}

@@ -1,0 +1,14 @@
+[package]
+name = "buildbond-escrow"
+version = "0.1.0"
+edition = "2021"
+description = "BuildBond milestone escrow, retainage, and dispute resolution smart contract on Stellar/Soroban"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = "27.0.6"
+
+[dev-dependencies]
+soroban-sdk = { version = "27.0.6", features = ["testutils"] }
