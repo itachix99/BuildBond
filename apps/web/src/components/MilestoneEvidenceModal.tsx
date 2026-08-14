@@ -72,7 +72,7 @@ export const MilestoneEvidenceModal: React.FC<MilestoneEvidenceModalProps> = ({
           </div>
 
           <div className="live-hash-preview">
-            <span className="hash-title">Computed SHA-256 Digest (On-Chain Reference):</span>
+            <span className="hash-title">Computed SHA-256 Digest (simulation preview):</span>
             <code>{liveHash}</code>
           </div>
 
@@ -90,7 +90,7 @@ export const MilestoneEvidenceModal: React.FC<MilestoneEvidenceModalProps> = ({
               className="btn btn-primary"
               disabled={isBusy || !description.trim()}
             >
-              {isBusy ? 'Signing Evidence...' : 'Submit Evidence on-chain'}
+              {isBusy ? 'Applying Simulation...' : 'Submit Evidence (simulated)'}
             </button>
           </div>
         </form>

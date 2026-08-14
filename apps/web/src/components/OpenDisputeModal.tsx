@@ -83,7 +83,7 @@ export const OpenDisputeModal: React.FC<OpenDisputeModalProps> = ({
               className="btn btn-danger"
               disabled={isBusy || !reason.trim()}
             >
-              {isBusy ? 'Freezing Funds on Testnet...' : `Freeze $${disputedAmount.toLocaleString()} & Open Dispute`}
+              {isBusy ? 'Applying Simulation...' : `Simulate Freeze of $${disputedAmount.toLocaleString()} & Open Dispute`}
             </button>
           </div>
         </form>

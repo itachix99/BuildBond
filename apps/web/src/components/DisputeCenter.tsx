@@ -32,7 +32,7 @@ export const DisputeCenter: React.FC<DisputeCenterProps> = ({
         <div>
           <h2 className="card-title">Construction Dispute & Neutral Arbitration Center</h2>
           <p className="card-subtitle">
-            Formal on-chain dispute resolution mechanism with automatic defect timer freezing and neutral arbiter split awards.
+            Local simulation of bounded dispute resolution, defect timer freezing, and neutral arbiter split awards.
           </p>
         </div>
       </div>
@@ -48,13 +48,13 @@ export const DisputeCenter: React.FC<DisputeCenterProps> = ({
         <div className="metric-box highlight">
           <div className="metric-label">Frozen In Dispute</div>
           <div className="metric-value">{project.accounting.disputed.toLocaleString()} <span>{project.paymentTokenSymbol}</span></div>
-          <div className="metric-hint">Protected in smart contract</div>
+          <div className="metric-hint">Marked frozen in local demo state</div>
         </div>
 
         <div className="metric-box success">
           <div className="metric-label">Resolved Disputes</div>
           <div className="metric-value">{disputesList.filter(d => d.status === 'Resolved').length}</div>
-          <div className="metric-hint">Binding awards executed</div>
+          <div className="metric-hint">Simulated awards applied locally</div>
         </div>
       </div>
 

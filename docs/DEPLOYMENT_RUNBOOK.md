@@ -66,24 +66,24 @@ Verify binary sizes and hashes:
 
 ---
 
-### Step 3.3: Automated Contract Deployment
+### Step 3.3: Deployment metadata (no on-chain deployment yet)
 
-Execute the automated deployment script targeting the desired network:
+The current script only builds WASM and records verified IDs from environment
+variables. It does not upload, deploy, initialize, or create a reference
+escrow. Mainnet is intentionally disabled.
 
 ```bash
-# Deploy to Testnet
+# Record an already verified Testnet deployment (all values are required)
+export BUILD_BOND_FACTORY_ID=C...
+export BUILD_BOND_REFERENCE_ESCROW_ID=C...
+export BUILD_BOND_PAYMENT_TOKEN=C...   # or a verified G... issuer
+export BUILD_BOND_ADMIN_ADDRESS=G...
 npm run deploy:testnet
-
-# Deploy to Mainnet (requires BUILD_BOND_ADMIN_ADDRESS environment variable)
-npm run deploy:mainnet
 ```
 
-The script will automatically:
-1. Upload and install the `buildbond_escrow.wasm` template.
-2. Deploy the `BuildBondFactoryContract` instance.
-3. Call `factory.initialize(admin_address, escrow_wasm_hash)`.
-4. Deploy a reference project instance through the factory to verify end-to-end execution.
-5. Write updated contract IDs to `packages/shared/src/contracts.json` and `.env.contracts`.
+The script validates Stellar StrKey formats before writing public metadata to
+`packages/shared/src/contracts.json` and `.env.contracts`. A successful local
+format check is not proof that a contract exists on-chain.
 
 ---
 
@@ -95,11 +95,13 @@ Verify on-chain deployment status and RPC reachability:
 npm run verify:deployment
 ```
 
-Expected output checklist:
+The verifier fails closed unless all required values are present and valid. Its
+format checks are not a substitute for live bytecode or contract-state
+verification:
 - `RPC Status`: Healthy (Ledger sequence verified)
 - `Escrow WASM`: Valid SHA-256 hash (64 hex characters)
 - `Factory WASM`: Valid SHA-256 hash (64 hex characters)
-- `Factory ID`: Verified on-chain
+- `Factory ID`: Valid Stellar contract ID (live existence still requires RPC verification)
 
 ---
 

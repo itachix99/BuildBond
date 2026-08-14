@@ -152,9 +152,10 @@ export interface TransactionLog {
   actorRole: RoleType;
   actorAddress: string;
   method: string;
-  txHash: string;
-  status: 'simulating' | 'signing' | 'confirmed' | 'failed';
+  /** The escrow workflow is a local simulation until contract integration is enabled. */
+  source: 'simulated' | 'testnet';
+  txHash?: string;
+  status: 'simulated' | 'simulating' | 'signing' | 'confirmed' | 'failed';
   details: string;
-  stellarExpertUrl: string;
+  stellarExpertUrl?: string;
 }
-

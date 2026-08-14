@@ -43,7 +43,7 @@ export const RoleSwitcher: React.FC<RoleSwitcherProps> = ({
         {/* Simulated Time Controls */}
         <div className="simulated-time-controls">
           <span className="time-label">
-            ⏱️ Clock: {simulatedDays === 0 ? 'Live Testnet' : `+${simulatedDays} Days`}
+            ⏱️ Simulated clock: {simulatedDays === 0 ? 'starting time' : `+${simulatedDays} days`}
           </span>
           <button
             type="button"

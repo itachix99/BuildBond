@@ -52,7 +52,7 @@ export const ArbitrationModal: React.FC<ArbitrationModalProps> = ({
       <div className="modal-card">
         <h3 className="modal-title">Neutral Arbitration Ruling & Award Allocation</h3>
         <p className="modal-desc">
-          Issue a binding on-chain award allocation dividing the frozen ${totalDisputed.toLocaleString()} {project.paymentTokenSymbol} between Contractor earnings and Owner refund.
+          Simulate a bounded award allocation dividing the frozen ${totalDisputed.toLocaleString()} {project.paymentTokenSymbol} between Contractor earnings and Owner refund. No contract call will be made.
         </p>
 
         <div className="milestone-target-summary" style={{ borderLeftColor: 'var(--color-purple-500)' }}>

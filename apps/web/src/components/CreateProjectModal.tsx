@@ -260,7 +260,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                 value={paymentTokenSymbol}
                 onChange={e => setPaymentTokenSymbol(e.target.value)}
               >
-                <option value="USDC">USDC (Testnet)</option>
+                <option value="USDC">USDC (simulation)</option>
                 <option value="XLM">Native XLM</option>
               </select>
             </div>
@@ -385,7 +385,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
               className="btn btn-primary"
               disabled={isBusy || totalCommitted <= 0}
             >
-              {isBusy ? 'Deploying to Stellar Testnet...' : `Deploy Escrow Contract ($${totalCommitted.toLocaleString()} ${paymentTokenSymbol})`}
+              {isBusy ? 'Creating Simulation...' : `Create Simulated Escrow ($${totalCommitted.toLocaleString()} ${paymentTokenSymbol})`}
             </button>
           </div>
         </form>

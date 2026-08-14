@@ -213,9 +213,8 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
     title: string,
     method: string,
     details: string,
-    status: 'simulating' | 'signing' | 'confirmed' | 'failed' = 'confirmed'
+    status: 'simulated' | 'simulating' | 'signing' | 'confirmed' | 'failed' = 'simulated'
   ) => {
-    const randomHash = Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
     const newLog: TransactionLog = {
       id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       timestamp: Date.now(),
@@ -223,10 +222,9 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
       actorRole: activeRole,
       actorAddress: activeAddress,
       method,
-      txHash: randomHash,
+      source: 'simulated',
       status,
-      details,
-      stellarExpertUrl: `https://stellar.expert/explorer/testnet/tx/${randomHash}`,
+      details: `[SIMULATED] ${details}`,
     };
     setLogs(prev => [newLog, ...prev]);
   }, [activeRole, activeAddress]);
@@ -269,7 +267,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
         };
       });
 
-      addLog(`Role Accepted (${role})`, 'accept_role', `Successfully confirmed ${role} role acceptance on-chain.`);
+      addLog(`Role Acceptance Simulated (${role})`, 'accept_role', `Applied ${role} role acceptance to the local demo state; no transaction was submitted.`);
     } finally {
       setIsBusy(false);
     }
@@ -344,7 +342,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
         };
       });
 
-      addLog('Deposit Confirmed', 'deposit', `Escrow custody increased by ${amount.toLocaleString()} ${project.paymentTokenSymbol}. Coverage updated.`);
+      addLog('Deposit Simulated', 'deposit', `Local demo custody increased by ${amount.toLocaleString()} ${project.paymentTokenSymbol}. No token transfer occurred.`);
     } finally {
       setIsBusy(false);
     }
@@ -373,7 +371,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
         }),
       }));
 
-      addLog(`Milestone #${milestoneId} Submitted`, 'submit_milestone', `Evidence recorded on-chain. Ready for independent inspection.`);
+      addLog(`Milestone #${milestoneId} Submission Simulated`, 'submit_milestone', `Evidence digest stored in the local demo state; no contract call occurred.`);
     } finally {
       setIsBusy(false);
     }
@@ -434,7 +432,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
         };
       });
 
-      addLog(`Milestone #${milestoneId} Approved`, 'inspect_milestone', `Immediate earnings unlocked. Defect liability countdown initialized.`);
+      addLog(`Milestone #${milestoneId} Inspection Simulated`, 'inspect_milestone', `Local demo approval applied; no on-chain earnings were unlocked.`);
     } finally {
       setIsBusy(false);
     }
@@ -444,7 +442,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
   const withdrawEarned = useCallback(async (amount: number) => {
     setIsBusy(true);
     try {
-      addLog('Earnings Withdrawal', 'withdraw_earned', `Contractor executing pull withdrawal of ${amount.toLocaleString()} ${project.paymentTokenSymbol}.`);
+      addLog('Earnings Withdrawal Simulated', 'withdraw_earned', `Local demo withdrawal of ${amount.toLocaleString()} ${project.paymentTokenSymbol}; no token transfer occurred.`);
       await new Promise(r => setTimeout(r, 700));
 
       updateCurrentProject(prev => ({
@@ -456,7 +454,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
         },
       }));
 
-      addLog('Withdrawal Confirmed', 'withdraw_earned', `Transferred ${amount.toLocaleString()} ${project.paymentTokenSymbol} to contractor wallet.`);
+      addLog('Withdrawal Simulation Applied', 'withdraw_earned', `Local demo balance updated by ${amount.toLocaleString()} ${project.paymentTokenSymbol}.`);
     } finally {
       setIsBusy(false);
     }
@@ -499,7 +497,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
         };
       });
 
-      addLog(`Retainage Released (#${milestoneId})`, 'claim_retainage', `Retainage claimed successfully. Milestone settled.`);
+      addLog(`Retainage Release Simulated (#${milestoneId})`, 'claim_retainage', `Local demo retainage was released. No token transfer occurred.`);
     } finally {
       setIsBusy(false);
     }
@@ -575,7 +573,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
         };
       });
 
-      addLog(`Dispute Recorded (#${milestoneId})`, 'open_dispute', `Funds frozen in escrow custody. Defect clock paused. Neutral arbiter notified.`);
+      addLog(`Dispute Simulation Applied (#${milestoneId})`, 'open_dispute', `Local demo funds were marked disputed and the simulated defect clock was paused.`);
     } finally {
       setIsBusy(false);
     }
@@ -638,7 +636,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
         };
       });
 
-      addLog(`Arbitration Resolved (#${milestoneId})`, 'resolve_dispute', `Binding award executed on-chain. Funds reallocated to contractor payable & owner refundable buckets.`);
+      addLog(`Arbitration Simulation Applied (#${milestoneId})`, 'resolve_dispute', `Local demo award applied to contractor payable and owner refundable buckets; no contract call occurred.`);
     } finally {
       setIsBusy(false);
     }
@@ -649,9 +647,9 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
     setIsBusy(true);
     try {
       addLog(
-        'Factory Escrow Deployment',
+        'Factory Deployment Simulated',
         'deploy_project',
-        `Deploying new isolated escrow contract for "${newProject.title}" via BuildBond Factory with salt & terms hash.`
+        `Simulating creation of an isolated escrow for "${newProject.title}" with a local salt and terms hash.`
       );
       await new Promise(r => setTimeout(r, 1000));
 
@@ -661,7 +659,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
       addLog(
         'Escrow Deployed & Registered',
         'deploy_project',
-        `Contract instance ${newProject.contractAddress.slice(0, 10)}... deployed and indexed in factory registry.`
+        `Project added to the local demo registry; no factory deployment or indexing occurred.`
       );
     } finally {
       setIsBusy(false);

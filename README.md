@@ -83,7 +83,7 @@ npm run check
 | **Contract Formatting & Lint** | Strict clippy check with zero warnings | `cargo fmt --all --check && cargo clippy --all-targets -- -D warnings` |
 | **Web Frontend Tests** | Canonical SHA-256 terms hashing, evidence digests, retainage math, and error diagnostic decoders (1..37) | `npm run test --workspace=@buildbond/web` |
 | **Event Indexer Tests** | SCVal XDR event decoding, deduplication, participant queries, timeline aggregations, and cursor persistence | `npm run test --workspace=@buildbond/indexer` |
-| **On-Chain Verification** | Live Testnet RPC health and bytecode hash validation | `npm run verify:deployment` |
+| **Deployment Metadata Verification** | RPC reachability plus strict format validation for supplied IDs/hashes; fails when metadata is absent | `npm run verify:deployment` |
 
 ---
 
@@ -103,19 +103,18 @@ The web dashboard provides:
 - **Milestone Pipeline**: Contractor deliverable evidence submittals and independent engineer certifications.
 - **Dispute & Arbitration Center**: Formal dispute initiation, defect clock freezing, and arbiter split awards.
 - **Withdrawal Hub**: Contractor immediate earnings pull-disbursements and mature retainage settlements.
-- **Transaction Audit Drawer**: Live on-chain transaction logs with direct Stellar Expert explorer links.
+- **Transaction Activity Drawer**: Clearly labeled local simulation entries; no escrow action is reported as an on-chain transaction.
 
 ---
 
-## 🌐 Deployed Testnet Contracts
+## 🌐 Deployment status
 
-| Contract | Address / Hash | Explorer Link |
-| :--- | :--- | :--- |
-| **BuildBond Factory** | `CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM` | [View on Stellar Expert](https://stellar.expert/explorer/testnet/contract/CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM) |
-| **Escrow WASM Hash** | `14a15e864d6f64eb7238fd81ef59b34dc8c046e54d2470484e3e0f39e81d5ef4` | Verified Protocol 27 Bytecode |
-| **Factory WASM Hash** | `19d34e58f76992e0dc8b765fafd487ba38cb6bf68c194c24c86662ada95a56d3` | Verified Protocol 27 Bytecode |
-| **Reference Escrow** | `CBONDFAC7Y3VDFG574TNDV62B6IQP7Y6YJ6B3EBRT4E3X74P4X5P7X99` | [View on Stellar Expert](https://stellar.expert/explorer/testnet/contract/CBONDFAC7Y3VDFG574TNDV62B6IQP7Y6YJ6B3EBRT4E3X74P4X5P7X99) |
-| **Testnet Payment Token** | `CUSDC7Y3VDFG574TNDV62B6IQP7Y6YJ6B3EBRT4E3X74P4X5P7XTESTNET01` | SEP-41 Compatible Stablecoin |
+No BuildBond escrow or factory contracts are configured in this checkout. The
+dashboard's escrow workflow is a local simulation and does not create, fund, or
+settle Soroban contracts. `scripts/deploy-contracts.ts` currently builds WASM
+and records operator-supplied metadata only; it refuses to invent IDs and
+Mainnet is disabled. The separate Direct XLM Pay flow is the only live Testnet
+transaction path currently enabled.
 
 ---
 

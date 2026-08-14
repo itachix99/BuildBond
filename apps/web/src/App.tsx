@@ -105,11 +105,11 @@ export const App: React.FC = () => {
       <section className="project-banner-card">
         <div className="project-banner-main">
           <div className="project-tags">
-            <span className="badge badge-blue">Soroban Escrow</span>
+            <span className="badge badge-amber">Simulation — not on-chain</span>
             <span className={`status-pill ${escrow.project.status === 'Active' ? 'success' : escrow.project.status === 'Suspended' ? 'danger' : 'warning'}`}>
               Status: {escrow.project.status}
             </span>
-            <span className="badge badge-amber">{escrow.project.paymentTokenSymbol} Settlement</span>
+            <span className="badge badge-amber">{escrow.project.paymentTokenSymbol} Settlement (simulated)</span>
             {openDisputesCount > 0 && (
               <span className="status-pill danger">⚠️ {openDisputesCount} Active Dispute</span>
             )}
@@ -118,10 +118,25 @@ export const App: React.FC = () => {
           <div className="project-meta">
             <span>📍 {escrow.project.location}</span>
             <span>•</span>
-            <span>Contract: <code>{escrow.project.contractAddress.slice(0, 10)}...{escrow.project.contractAddress.slice(-6)}</code></span>
+            <span>Contract: <code>not deployed</code></span>
             <span>•</span>
             <span>Commitment: <strong>{escrow.project.totalCommitted.toLocaleString()} {escrow.project.paymentTokenSymbol}</strong></span>
           </div>
+        </div>
+
+        <div
+          role="status"
+          style={{
+            marginTop: '0.75rem',
+            padding: '0.75rem 1rem',
+            border: '1px solid var(--accent-amber)',
+            borderRadius: 'var(--radius-md)',
+            color: 'var(--text-secondary)',
+            background: 'var(--bg-surface-elevated)',
+            fontSize: '0.8125rem',
+          }}
+        >
+          This escrow workspace is a local product simulation. Its role actions, balances, clock, and audit entries do not submit Soroban transactions. The separate Direct XLM Pay flow is the only live Testnet transaction in this build.
         </div>
 
         {/* Tab Navigation */}
@@ -281,7 +296,7 @@ export const App: React.FC = () => {
         onPaymentSuccess={() => balance.refresh()}
       />
 
-      {/* On-Chain Transaction Audit Drawer */}
+      {/* Local escrow simulation activity drawer */}
       <TransactionAuditDrawer logs={escrow.logs} />
     </div>
   );

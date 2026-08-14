@@ -2,8 +2,9 @@
 /**
  * BuildBond Production & Testnet Deployment Automation Script
  *
- * Automates compiling, WASM installation, factory contract deployment,
- * initialization, and reference escrow deployment on Stellar/Soroban.
+ * Builds WASM artifacts and records verified deployment metadata supplied by
+ * the operator. On-chain upload/deploy/initialization is intentionally not
+ * performed by this script yet.
  */
 
 import fs from 'fs';
@@ -11,6 +12,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
+import { StrKey } from '@stellar/stellar-sdk';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -24,8 +26,39 @@ interface DeploymentResult {
   factoryWasmHash: string;
   factoryContractId: string;
   referenceEscrowContractId: string;
+  paymentTokenAddress: string;
   adminAddress: string;
   deployedAt: string;
+}
+
+function requireContractId(name: string, value: string | undefined): string {
+  if (!value) {
+    throw new Error(`${name} is not configured. This script will not invent a contract ID; provide a verified on-chain value.`);
+  }
+  if (!StrKey.isValidContract(value)) {
+    throw new Error(`${name} is not a valid Stellar contract ID: ${value}`);
+  }
+  return value;
+}
+
+function requireAccountId(name: string, value: string | undefined): string {
+  if (!value) {
+    throw new Error(`${name} is not configured. Provide a verified Stellar account address.`);
+  }
+  if (!StrKey.isValidEd25519PublicKey(value)) {
+    throw new Error(`${name} is not a valid Stellar account address: ${value}`);
+  }
+  return value;
+}
+
+function requireTokenId(value: string | undefined): string {
+  if (!value) {
+    throw new Error('BUILD_BOND_PAYMENT_TOKEN is not configured. Provide the deployed SEP-41 token contract or issuer account.');
+  }
+  if (!StrKey.isValidContract(value) && !StrKey.isValidEd25519PublicKey(value)) {
+    throw new Error(`BUILD_BOND_PAYMENT_TOKEN is not a valid Stellar contract or account address: ${value}`);
+  }
+  return value;
 }
 
 function runCommand(command: string, cwd: string = ROOT_DIR): string {
@@ -40,9 +73,14 @@ function runCommand(command: string, cwd: string = ROOT_DIR): string {
 }
 
 export async function deployContracts(network: 'testnet' | 'mainnet' | 'local' = 'testnet'): Promise<DeploymentResult> {
+  if (network === 'mainnet') {
+    throw new Error('Mainnet deployment is disabled. Use a separately approved deployment ceremony.');
+  }
+
   console.log('====================================================');
-  console.log(` BuildBond Contract Deployment — [${network.toUpperCase()}]`);
+  console.log(` BuildBond Deployment Configuration — [${network.toUpperCase()}]`);
   console.log('====================================================\n');
+  console.log('This script builds WASM and records verified IDs supplied through the environment. It does not upload or deploy contracts.\n');
 
   // 1. Build and optimize WASM binaries
   console.log('📦 Step 1: Compiling and optimizing Soroban WASM bytecodes...');
@@ -78,9 +116,10 @@ export async function deployContracts(network: 'testnet' | 'mainnet' | 'local' =
     ? 'Standalone Network ; February 2017'
     : 'Test SDF Network ; September 2015';
 
-  const adminAddress = process.env.BUILD_BOND_ADMIN_ADDRESS || 'GAADMIN7Y3VDFG574TNDV62B6IQP7Y6YJ6B3EBRT4E3X74P4X5P7X000';
-  const factoryContractId = process.env.BUILD_BOND_FACTORY_ID || `CBBFAC${escrowWasmHash.slice(0, 48).toUpperCase()}01`;
-  const referenceEscrowContractId = process.env.BUILD_BOND_REFERENCE_ESCROW_ID || `CBBESC${escrowWasmHash.slice(0, 48).toUpperCase()}99`;
+  const adminAddress = requireAccountId('BUILD_BOND_ADMIN_ADDRESS', process.env.BUILD_BOND_ADMIN_ADDRESS);
+  const factoryContractId = requireContractId('BUILD_BOND_FACTORY_ID', process.env.BUILD_BOND_FACTORY_ID);
+  const referenceEscrowContractId = requireContractId('BUILD_BOND_REFERENCE_ESCROW_ID', process.env.BUILD_BOND_REFERENCE_ESCROW_ID);
+  const paymentTokenAddress = requireTokenId(process.env.BUILD_BOND_PAYMENT_TOKEN);
 
   const result: DeploymentResult = {
     network,
@@ -90,6 +129,7 @@ export async function deployContracts(network: 'testnet' | 'mainnet' | 'local' =
     factoryWasmHash,
     factoryContractId,
     referenceEscrowContractId,
+    paymentTokenAddress,
     adminAddress,
     deployedAt: new Date().toISOString(),
   };
@@ -114,7 +154,7 @@ export async function deployContracts(network: 'testnet' | 'mainnet' | 'local' =
     escrowWasmHash,
     factoryWasmHash,
     referenceEscrowContractId,
-    paymentTokenAddress: currentContracts[network]?.paymentTokenAddress || 'CUSDC7Y3VDFG574TNDV62B6IQP7Y6YJ6B3EBRT4E3X74P4X5P7XTESTNET01',
+    paymentTokenAddress,
     adminAddress,
   };
 
@@ -131,6 +171,7 @@ VITE_STELLAR_RPC_URL=${rpcUrl}
 VITE_STELLAR_NETWORK_PASSPHRASE="${networkPassphrase}"
 VITE_FACTORY_CONTRACT_ID=${factoryContractId}
 VITE_REFERENCE_ESCROW_ID=${referenceEscrowContractId}
+VITE_BUILD_BOND_PAYMENT_TOKEN=${paymentTokenAddress}
 BUILD_BOND_ESCROW_WASM_HASH=${escrowWasmHash}
 BUILD_BOND_FACTORY_WASM_HASH=${factoryWasmHash}
 BUILD_BOND_ADMIN_ADDRESS=${adminAddress}
@@ -140,7 +181,7 @@ BUILD_BOND_ADMIN_ADDRESS=${adminAddress}
   console.log(`✓ Generated ${envContractsPath}\n`);
 
   console.log('====================================================');
-  console.log(' Deployment Artifacts & Registry Summary:');
+  console.log(' Verified Configuration Recorded (deployment must be verified separately):');
   console.log('====================================================');
   console.table({
     Network: network,
@@ -157,7 +198,7 @@ BUILD_BOND_ADMIN_ADDRESS=${adminAddress}
 async function main() {
   const networkArg = (process.argv[2]?.replace('--network=', '') || 'testnet') as 'testnet' | 'mainnet' | 'local';
   await deployContracts(networkArg);
-  console.log('🎉 Deployment routine completed successfully!');
+  console.log('Configuration recording completed. No on-chain deployment was performed.');
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

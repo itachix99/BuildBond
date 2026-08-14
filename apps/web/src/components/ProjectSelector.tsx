@@ -33,7 +33,7 @@ export const ProjectSelector: React.FC<ProjectSelectorProps> = ({
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
         <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-          Active Construction Escrow:
+          Simulated Construction Escrow:
         </span>
 
         <select
@@ -60,7 +60,7 @@ export const ProjectSelector: React.FC<ProjectSelectorProps> = ({
 
       <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
         <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-          Factory Registry: <strong>{projects.length} Projects</strong>
+          Local demo registry: <strong>{projects.length} Projects</strong>
         </span>
 
         <button
@@ -69,7 +69,7 @@ export const ProjectSelector: React.FC<ProjectSelectorProps> = ({
           style={{ fontSize: '0.8125rem', padding: '0.4rem 0.75rem' }}
           onClick={onOpenCreateModal}
         >
-          + Deploy New Project...
+          + Create Simulated Project...
         </button>
       </div>
     </div>

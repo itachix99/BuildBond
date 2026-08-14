@@ -100,7 +100,7 @@ export const RoleAcceptanceCard: React.FC<RoleAcceptanceCardProps> = ({
               onClick={() => onAcceptRole(activeRole)}
               disabled={isBusy}
             >
-              {isBusy ? 'Signing on Testnet...' : `Accept Role as ${activeRole}`}
+              {isBusy ? 'Applying Simulation...' : `Accept Role (simulated) as ${activeRole}`}
             </button>
           </div>
         </div>
@@ -112,7 +112,7 @@ export const RoleAcceptanceCard: React.FC<RoleAcceptanceCardProps> = ({
           <div className="modal-card">
             <h3 className="modal-title">Decline Role Invitation</h3>
             <p className="modal-desc">
-              Declining this role will place the project in <strong>Suspended</strong> status on-chain. Please provide a formal reason digest for the audit trail.
+              Declining this role will place the local demo project in <strong>Suspended</strong> status. Please provide a formal reason digest for the simulation log.
             </p>
             <form onSubmit={handleDeclineSubmit}>
               <textarea

@@ -16,7 +16,7 @@ export const TransactionAuditDrawer: React.FC<TransactionAuditDrawerProps> = ({ 
         onClick={() => setIsOpen(!isOpen)}
       >
         <span className="drawer-icon">📜</span>
-        <span className="drawer-title">On-Chain Audit Log ({logs.length})</span>
+        <span className="drawer-title">Escrow Activity Log ({logs.length})</span>
         <span className="drawer-arrow">{isOpen ? '▼' : '▲'}</span>
       </button>
 
@@ -36,14 +36,20 @@ export const TransactionAuditDrawer: React.FC<TransactionAuditDrawerProps> = ({ 
                   <div className="log-item-desc">{log.details}</div>
                   <div className="log-item-meta">
                     <span className="log-actor">Actor: <strong>{log.actorRole}</strong> ({log.actorAddress.slice(0, 6)}...{log.actorAddress.slice(-4)})</span>
-                    <a
-                      href={log.stellarExpertUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="log-explorer-link"
-                    >
-                      Tx: {log.txHash.slice(0, 8)}... ↗
-                    </a>
+                    {log.source === 'testnet' && log.txHash && log.stellarExpertUrl ? (
+                      <a
+                        href={log.stellarExpertUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="log-explorer-link"
+                      >
+                        Tx: {log.txHash.slice(0, 8)}... ↗
+                      </a>
+                    ) : (
+                      <span className="log-explorer-link" title="This workflow action has not been submitted to Stellar">
+                        Local simulation · no transaction
+                      </span>
+                    )}
                   </div>
                 </div>
               ))}

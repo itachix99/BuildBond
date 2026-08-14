@@ -44,7 +44,7 @@ export const InspectionModal: React.FC<InspectionModalProps> = ({
       <div className="modal-card">
         <h3 className="modal-title">Independent Engineering Inspection Certification</h3>
         <p className="modal-desc">
-          Review the contractor's submitted deliverable evidence and issue an irrevocable on-chain certification.
+          Review the contractor's submitted deliverable evidence and record a local demo certification. No contract call will be made.
         </p>
 
         <div className="milestone-target-summary">
