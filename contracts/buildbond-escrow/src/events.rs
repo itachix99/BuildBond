@@ -62,6 +62,52 @@ pub struct RefundWithdrawnEvent {
     pub timestamp: u64,
 }
 
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MilestoneSubmittedEvent {
+    pub milestone_id: u32,
+    pub contractor: Address,
+    pub evidence_hash: BytesN<32>,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InspectionRecordedEvent {
+    pub milestone_id: u32,
+    pub inspector: Address,
+    pub decision: u32, // 1 = Approve, 2 = Reject
+    pub report_hash: BytesN<32>,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MilestoneApprovedEvent {
+    pub milestone_id: u32,
+    pub immediate_amount: i128,
+    pub retainage_amount: i128,
+    pub defect_deadline_at: u64,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PaymentWithdrawnEvent {
+    pub beneficiary: Address,
+    pub amount: i128,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RetainageClaimedEvent {
+    pub milestone_id: u32,
+    pub contractor: Address,
+    pub amount: i128,
+    pub timestamp: u64,
+}
+
 pub fn emit_project_created(env: &Env, terms: &ProjectTerms) {
     ProjectCreatedEvent {
         owner: terms.owner.clone(),
@@ -143,6 +189,83 @@ pub fn emit_milestone_funded(env: &Env, milestone_id: u32, amount: i128, timesta
 pub fn emit_refund_withdrawn(env: &Env, owner: &Address, amount: i128, timestamp: u64) {
     RefundWithdrawnEvent {
         owner: owner.clone(),
+        amount,
+        timestamp,
+    }
+    .publish(env);
+}
+
+pub fn emit_milestone_submitted(
+    env: &Env,
+    milestone_id: u32,
+    contractor: &Address,
+    evidence_hash: &BytesN<32>,
+    timestamp: u64,
+) {
+    MilestoneSubmittedEvent {
+        milestone_id,
+        contractor: contractor.clone(),
+        evidence_hash: evidence_hash.clone(),
+        timestamp,
+    }
+    .publish(env);
+}
+
+pub fn emit_inspection_recorded(
+    env: &Env,
+    milestone_id: u32,
+    inspector: &Address,
+    decision: u32,
+    report_hash: &BytesN<32>,
+    timestamp: u64,
+) {
+    InspectionRecordedEvent {
+        milestone_id,
+        inspector: inspector.clone(),
+        decision,
+        report_hash: report_hash.clone(),
+        timestamp,
+    }
+    .publish(env);
+}
+
+pub fn emit_milestone_approved(
+    env: &Env,
+    milestone_id: u32,
+    immediate_amount: i128,
+    retainage_amount: i128,
+    defect_deadline_at: u64,
+    timestamp: u64,
+) {
+    MilestoneApprovedEvent {
+        milestone_id,
+        immediate_amount,
+        retainage_amount,
+        defect_deadline_at,
+        timestamp,
+    }
+    .publish(env);
+}
+
+pub fn emit_payment_withdrawn(env: &Env, beneficiary: &Address, amount: i128, timestamp: u64) {
+    PaymentWithdrawnEvent {
+        beneficiary: beneficiary.clone(),
+        amount,
+        timestamp,
+    }
+    .publish(env);
+}
+
+pub fn emit_retainage_claimed(
+    env: &Env,
+    milestone_id: u32,
+    contractor: &Address,
+    amount: i128,
+    timestamp: u64,
+) {
+    RetainageClaimedEvent {
+        milestone_id,
+        contractor: contractor.clone(),
         amount,
         timestamp,
     }

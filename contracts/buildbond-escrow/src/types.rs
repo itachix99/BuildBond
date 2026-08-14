@@ -191,3 +191,18 @@ pub struct CoverageView {
     pub coverage_ratio_bps: u32,
     pub is_fully_covered: bool,
 }
+
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum InspectionDecision {
+    Approve = 1,
+    Reject = 2,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClaimableView {
+    pub contractor_payable: i128,
+    pub retainage_claimable: i128,
+    pub owner_refundable: i128,
+}

@@ -8,8 +8,10 @@ pub mod types;
 pub mod test;
 
 use events::{
-    emit_milestone_funded, emit_project_activated, emit_project_created, emit_project_funded,
-    emit_refund_withdrawn, emit_role_accepted, emit_role_declined,
+    emit_inspection_recorded, emit_milestone_approved, emit_milestone_funded,
+    emit_milestone_submitted, emit_payment_withdrawn, emit_project_activated, emit_project_created,
+    emit_project_funded, emit_refund_withdrawn, emit_retainage_claimed, emit_role_accepted,
+    emit_role_declined,
 };
 use storage::{
     get_accounting, get_milestone, get_milestone_count, get_role_acceptance, get_role_address,
@@ -17,8 +19,9 @@ use storage::{
     set_milestone, set_milestone_count, set_role_acceptance, set_status, set_terms,
 };
 use types::{
-    AcceptanceView, Accounting, BuildBondError, CoverageView, FundingPolicy, Milestone,
-    MilestoneInput, MilestoneStatus, ProjectStatus, ProjectTerms, ProjectView, Role,
+    AcceptanceView, Accounting, BuildBondError, ClaimableView, CoverageView, FundingPolicy,
+    InspectionDecision, Milestone, MilestoneInput, MilestoneStatus, ProjectStatus, ProjectTerms,
+    ProjectView, Role,
 };
 
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
@@ -423,6 +426,276 @@ impl BuildBondEscrowContract {
         Ok(())
     }
 
+    /// Submits completed milestone evidence by contractor
+    pub fn submit_milestone(
+        env: Env,
+        contractor: Address,
+        milestone_id: u32,
+        evidence_hash: BytesN<32>,
+    ) -> Result<(), BuildBondError> {
+        if !is_initialized(&env) {
+            return Err(BuildBondError::NotInitialized);
+        }
+
+        let status = get_status(&env)?;
+        if status != ProjectStatus::Active {
+            return Err(BuildBondError::ProjectNotActive);
+        }
+
+        contractor.require_auth();
+
+        let terms = get_terms(&env)?;
+        if contractor != terms.contractor {
+            return Err(BuildBondError::Unauthorized);
+        }
+
+        let mut m = get_milestone(&env, milestone_id)?;
+        if m.status != MilestoneStatus::Funded
+            && m.status != MilestoneStatus::Rejected
+            && m.status != MilestoneStatus::ReworkRequired
+        {
+            return Err(BuildBondError::InvalidState);
+        }
+
+        m.status = MilestoneStatus::Submitted;
+        m.evidence_hash = Some(evidence_hash.clone());
+
+        set_milestone(&env, milestone_id, &m);
+        emit_milestone_submitted(
+            &env,
+            milestone_id,
+            &contractor,
+            &evidence_hash,
+            env.ledger().timestamp(),
+        );
+
+        Ok(())
+    }
+
+    /// Inspects and approves or rejects a submitted milestone by accredited inspector
+    pub fn inspect_milestone(
+        env: Env,
+        inspector: Address,
+        milestone_id: u32,
+        decision: InspectionDecision,
+        report_hash: BytesN<32>,
+    ) -> Result<(), BuildBondError> {
+        if !is_initialized(&env) {
+            return Err(BuildBondError::NotInitialized);
+        }
+
+        let status = get_status(&env)?;
+        if status != ProjectStatus::Active {
+            return Err(BuildBondError::ProjectNotActive);
+        }
+
+        inspector.require_auth();
+
+        let terms = get_terms(&env)?;
+        if inspector != terms.inspector {
+            return Err(BuildBondError::Unauthorized);
+        }
+
+        let mut m = get_milestone(&env, milestone_id)?;
+        if m.status != MilestoneStatus::Submitted {
+            return Err(BuildBondError::InvalidState);
+        }
+
+        match decision {
+            InspectionDecision::Reject => {
+                m.status = MilestoneStatus::Rejected;
+                set_milestone(&env, milestone_id, &m);
+                emit_inspection_recorded(
+                    &env,
+                    milestone_id,
+                    &inspector,
+                    2, // Reject code
+                    &report_hash,
+                    env.ledger().timestamp(),
+                );
+            }
+            InspectionDecision::Approve => {
+                // Calculate retainage and immediate disbursement
+                let retainage_calc = (m.amount as u128)
+                    .checked_mul(terms.retainage_bps as u128)
+                    .ok_or(BuildBondError::ArithmeticOverflow)?
+                    / 10_000;
+                let retainage_i128 = retainage_calc as i128;
+                let immediate_i128 = m
+                    .amount
+                    .checked_sub(retainage_i128)
+                    .ok_or(BuildBondError::ArithmeticOverflow)?;
+
+                let mut accounting = get_accounting(&env)?;
+                accounting.allocated = accounting
+                    .allocated
+                    .checked_sub(m.amount)
+                    .ok_or(BuildBondError::ArithmeticOverflow)?;
+                accounting.contractor_payable = accounting
+                    .contractor_payable
+                    .checked_add(immediate_i128)
+                    .ok_or(BuildBondError::ArithmeticOverflow)?;
+                accounting.retainage_locked = accounting
+                    .retainage_locked
+                    .checked_add(retainage_i128)
+                    .ok_or(BuildBondError::ArithmeticOverflow)?;
+
+                let approved_at = env.ledger().timestamp();
+                let defect_deadline_at = approved_at
+                    .checked_add(terms.defect_period_secs)
+                    .ok_or(BuildBondError::ArithmeticOverflow)?;
+
+                m.immediate_amount = immediate_i128;
+                m.retainage_amount = retainage_i128;
+                m.approved_at = Some(approved_at);
+                m.defect_deadline_at = Some(defect_deadline_at);
+                m.status = MilestoneStatus::InDefectPeriod;
+
+                set_milestone(&env, milestone_id, &m);
+                set_accounting(&env, &accounting);
+
+                emit_inspection_recorded(
+                    &env,
+                    milestone_id,
+                    &inspector,
+                    1, // Approve code
+                    &report_hash,
+                    approved_at,
+                );
+                emit_milestone_approved(
+                    &env,
+                    milestone_id,
+                    immediate_i128,
+                    retainage_i128,
+                    defect_deadline_at,
+                    approved_at,
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Withdraws earned payable balance to contractor
+    pub fn withdraw_earned(
+        env: Env,
+        contractor: Address,
+        amount: i128,
+    ) -> Result<(), BuildBondError> {
+        if !is_initialized(&env) {
+            return Err(BuildBondError::NotInitialized);
+        }
+
+        if amount <= 0 {
+            return Err(BuildBondError::InvalidAmount);
+        }
+
+        contractor.require_auth();
+
+        let terms = get_terms(&env)?;
+        if contractor != terms.contractor {
+            return Err(BuildBondError::Unauthorized);
+        }
+
+        let mut accounting = get_accounting(&env)?;
+        if accounting.contractor_payable < amount {
+            return Err(BuildBondError::NothingToWithdraw);
+        }
+
+        accounting.contractor_payable = accounting
+            .contractor_payable
+            .checked_sub(amount)
+            .ok_or(BuildBondError::ArithmeticOverflow)?;
+        accounting.withdrawn = accounting
+            .withdrawn
+            .checked_add(amount)
+            .ok_or(BuildBondError::ArithmeticOverflow)?;
+
+        set_accounting(&env, &accounting);
+
+        let contract_address = env.current_contract_address();
+        let token_client = token::Client::new(&env, &terms.payment_token);
+        token_client.transfer(&contract_address, &contractor, &amount);
+
+        emit_payment_withdrawn(&env, &contractor, amount, env.ledger().timestamp());
+
+        Ok(())
+    }
+
+    /// Claims mature retainage after the defect liability period expires
+    pub fn claim_retainage(
+        env: Env,
+        contractor: Address,
+        milestone_id: u32,
+    ) -> Result<(), BuildBondError> {
+        if !is_initialized(&env) {
+            return Err(BuildBondError::NotInitialized);
+        }
+
+        contractor.require_auth();
+
+        let terms = get_terms(&env)?;
+        if contractor != terms.contractor {
+            return Err(BuildBondError::Unauthorized);
+        }
+
+        let mut m = get_milestone(&env, milestone_id)?;
+        if m.status != MilestoneStatus::InDefectPeriod
+            && m.status != MilestoneStatus::RetainageClaimable
+        {
+            return Err(BuildBondError::InvalidState);
+        }
+
+        let deadline = m.defect_deadline_at.ok_or(BuildBondError::InvalidState)?;
+
+        if env.ledger().timestamp() < deadline {
+            return Err(BuildBondError::RetainageNotMature);
+        }
+
+        let remaining = m
+            .retainage_amount
+            .checked_sub(m.retained_released)
+            .ok_or(BuildBondError::ArithmeticOverflow)?;
+
+        if remaining <= 0 {
+            return Err(BuildBondError::RetainageAlreadyReleased);
+        }
+
+        let mut accounting = get_accounting(&env)?;
+        if accounting.retainage_locked < remaining {
+            return Err(BuildBondError::InsufficientEscrowBalance);
+        }
+
+        accounting.retainage_locked = accounting
+            .retainage_locked
+            .checked_sub(remaining)
+            .ok_or(BuildBondError::ArithmeticOverflow)?;
+        accounting.withdrawn = accounting
+            .withdrawn
+            .checked_add(remaining)
+            .ok_or(BuildBondError::ArithmeticOverflow)?;
+
+        m.retained_released = m.retainage_amount;
+        m.status = MilestoneStatus::Settled;
+
+        set_milestone(&env, milestone_id, &m);
+        set_accounting(&env, &accounting);
+
+        let contract_address = env.current_contract_address();
+        let token_client = token::Client::new(&env, &terms.payment_token);
+        token_client.transfer(&contract_address, &contractor, &remaining);
+
+        emit_retainage_claimed(
+            &env,
+            milestone_id,
+            &contractor,
+            remaining,
+            env.ledger().timestamp(),
+        );
+
+        Ok(())
+    }
+
     // --- Read Methods ---
 
     pub fn project(env: Env) -> Result<ProjectView, BuildBondError> {
@@ -488,6 +761,50 @@ impl BuildBondEscrowContract {
             total_milestones: milestone_count,
             coverage_ratio_bps: coverage_bps,
             is_fully_covered,
+        })
+    }
+
+    pub fn claimable(env: Env, address: Address) -> Result<ClaimableView, BuildBondError> {
+        let terms = get_terms(&env)?;
+        let accounting = get_accounting(&env)?;
+        let milestone_count = get_milestone_count(&env);
+
+        let mut mature_retainage: i128 = 0;
+        if address == terms.contractor {
+            for i in 1..=milestone_count {
+                if let Ok(m) = get_milestone(&env, i) {
+                    if m.status == MilestoneStatus::InDefectPeriod
+                        || m.status == MilestoneStatus::RetainageClaimable
+                    {
+                        if let Some(deadline) = m.defect_deadline_at {
+                            if env.ledger().timestamp() >= deadline {
+                                let rem = m.retainage_amount.saturating_sub(m.retained_released);
+                                mature_retainage = mature_retainage.saturating_add(rem);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let contractor_payable = if address == terms.contractor {
+            accounting.contractor_payable
+        } else {
+            0
+        };
+
+        let owner_refundable = if address == terms.owner {
+            accounting
+                .owner_refundable
+                .saturating_add(get_unallocated_funds(&accounting).unwrap_or(0))
+        } else {
+            0
+        };
+
+        Ok(ClaimableView {
+            contractor_payable,
+            retainage_claimable: mature_retainage,
+            owner_refundable,
         })
     }
 }

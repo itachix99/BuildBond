@@ -1,7 +1,9 @@
 #![cfg(test)]
 
 use super::*;
-use crate::types::{FundingPolicy, MilestoneInput, MilestoneStatus, ProjectTerms, Role};
+use crate::types::{
+    FundingPolicy, InspectionDecision, MilestoneInput, MilestoneStatus, ProjectTerms, Role,
+};
 use soroban_sdk::{
     testutils::{Address as _, BytesN as _, Ledger},
     token, Address, BytesN, Env, Vec,
@@ -328,7 +330,7 @@ fn test_deposit_and_auto_allocation_fully_funded() {
     let contract_id = env.register(BuildBondEscrowContract, ());
     let client = BuildBondEscrowContractClient::new(&env, &contract_id);
 
-    let (terms, owner, contractor, inspector, arbiter, _payment_token, token_client) =
+    let (terms, owner, contractor, inspector, arbiter, _, token_client) =
         create_test_terms(&env, FundingPolicy::FullyFunded);
     let milestones = create_test_milestones(&env);
 
@@ -486,4 +488,180 @@ fn test_unsolicited_token_transfer_does_not_inflate_liabilities() {
     assert_eq!(cov.deposited, 60_000);
     assert_eq!(cov.allocated, 60_000);
     assert_eq!(cov.unallocated, 0);
+}
+
+// ==========================================
+// Phase 5 Milestone Lifecycle & Retainage Tests
+// ==========================================
+
+#[test]
+fn test_milestone_submission_and_rejection_resubmission() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_000);
+
+    let contract_id = env.register(BuildBondEscrowContract, ());
+    let client = BuildBondEscrowContractClient::new(&env, &contract_id);
+
+    let (terms, owner, contractor, inspector, arbiter, _, token_client) =
+        create_test_terms(&env, FundingPolicy::FullyFunded);
+    let milestones = create_test_milestones(&env);
+
+    client.initialize(&terms, &milestones);
+    token_client.mint(&owner, &60_000);
+    client.deposit(&owner, &60_000);
+
+    // Accept roles and activate
+    client.accept_role(&contractor, &Role::Contractor, &terms.terms_hash);
+    client.accept_role(&inspector, &Role::Inspector, &terms.terms_hash);
+    client.accept_role(&arbiter, &Role::Arbiter, &terms.terms_hash);
+    client.activate(&owner);
+
+    // 1. Unauthorized contractor submission fails
+    let impostor = Address::generate(&env);
+    let evidence_1 = BytesN::random(&env);
+    let res = client.try_submit_milestone(&impostor, &1, &evidence_1);
+    assert_eq!(res.err(), Some(Ok(BuildBondError::Unauthorized)));
+
+    // 2. Contractor submits Milestone 1
+    client.submit_milestone(&contractor, &1, &evidence_1);
+    let m1 = client.milestone(&1);
+    assert_eq!(m1.status, MilestoneStatus::Submitted);
+    assert_eq!(m1.evidence_hash, Some(evidence_1));
+
+    // 3. Inspector rejects with report hash
+    let report_1 = BytesN::random(&env);
+    client.inspect_milestone(&inspector, &1, &InspectionDecision::Reject, &report_1);
+    let m1_rejected = client.milestone(&1);
+    assert_eq!(m1_rejected.status, MilestoneStatus::Rejected);
+
+    // 4. Contractor resubmits with updated evidence
+    let evidence_2 = BytesN::random(&env);
+    client.submit_milestone(&contractor, &1, &evidence_2);
+    let m1_resubmitted = client.milestone(&1);
+    assert_eq!(m1_resubmitted.status, MilestoneStatus::Submitted);
+    assert_eq!(m1_resubmitted.evidence_hash, Some(evidence_2));
+}
+
+#[test]
+fn test_milestone_approval_and_retainage_split() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(10_000);
+
+    let contract_id = env.register(BuildBondEscrowContract, ());
+    let client = BuildBondEscrowContractClient::new(&env, &contract_id);
+
+    let (terms, owner, contractor, inspector, arbiter, _, token_client) =
+        create_test_terms(&env, FundingPolicy::FullyFunded);
+    let milestones = create_test_milestones(&env);
+
+    client.initialize(&terms, &milestones);
+    token_client.mint(&owner, &60_000);
+    client.deposit(&owner, &60_000);
+
+    client.accept_role(&contractor, &Role::Contractor, &terms.terms_hash);
+    client.accept_role(&inspector, &Role::Inspector, &terms.terms_hash);
+    client.accept_role(&arbiter, &Role::Arbiter, &terms.terms_hash);
+    client.activate(&owner);
+
+    // Submit Milestone 1 ($25,000)
+    let evidence = BytesN::random(&env);
+    client.submit_milestone(&contractor, &1, &evidence);
+
+    // Inspector approves ($25,000 at 10% retainage = $22,500 immediate + $2,500 retainage)
+    let report = BytesN::random(&env);
+    client.inspect_milestone(&inspector, &1, &InspectionDecision::Approve, &report);
+
+    let m1 = client.milestone(&1);
+    assert_eq!(m1.status, MilestoneStatus::InDefectPeriod);
+    assert_eq!(m1.immediate_amount, 22_500);
+    assert_eq!(m1.retainage_amount, 2_500);
+    assert_eq!(m1.approved_at, Some(10_000));
+    assert_eq!(m1.defect_deadline_at, Some(10_000 + 90 * 86400));
+
+    // Check accounting
+    let acct = client.accounting();
+    assert_eq!(acct.allocated, 35_000); // Only Milestone 2 remains in allocated
+    assert_eq!(acct.contractor_payable, 22_500);
+    assert_eq!(acct.retainage_locked, 2_500);
+
+    // Invariant: allocated (35k) + payable (22.5k) + retainage (2.5k) == deposited (60k)
+    assert_eq!(
+        acct.allocated + acct.contractor_payable + acct.retainage_locked,
+        acct.deposited
+    );
+}
+
+#[test]
+fn test_contractor_earned_withdrawal_and_retainage_claim_end_to_end() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(10_000);
+
+    let contract_id = env.register(BuildBondEscrowContract, ());
+    let client = BuildBondEscrowContractClient::new(&env, &contract_id);
+
+    let (terms, owner, contractor, inspector, arbiter, _, token_client) =
+        create_test_terms(&env, FundingPolicy::FullyFunded);
+    let milestones = create_test_milestones(&env);
+
+    client.initialize(&terms, &milestones);
+    token_client.mint(&owner, &60_000);
+    client.deposit(&owner, &60_000);
+
+    client.accept_role(&contractor, &Role::Contractor, &terms.terms_hash);
+    client.accept_role(&inspector, &Role::Inspector, &terms.terms_hash);
+    client.accept_role(&arbiter, &Role::Arbiter, &terms.terms_hash);
+    client.activate(&owner);
+
+    // Milestone 1 ($25,000) submit & approve
+    let evidence = BytesN::random(&env);
+    client.submit_milestone(&contractor, &1, &evidence);
+    let report = BytesN::random(&env);
+    client.inspect_milestone(&inspector, &1, &InspectionDecision::Approve, &report);
+
+    // 1. Contractor withdraws partial immediate earnings (12,500)
+    client.withdraw_earned(&contractor, &12_500);
+    assert_eq!(token_client.balance(&contractor), 12_500);
+    assert_eq!(client.accounting().contractor_payable, 10_000);
+    assert_eq!(client.accounting().withdrawn, 12_500);
+
+    // 2. Contractor withdraws remaining immediate earnings (10,000)
+    client.withdraw_earned(&contractor, &10_000);
+    assert_eq!(token_client.balance(&contractor), 22_500);
+    assert_eq!(client.accounting().contractor_payable, 0);
+    assert_eq!(client.accounting().withdrawn, 22_500);
+
+    // 3. Attempting to withdraw when nothing is payable fails
+    let res = client.try_withdraw_earned(&contractor, &1_000);
+    assert_eq!(res.err(), Some(Ok(BuildBondError::NothingToWithdraw)));
+
+    // 4. Retainage claim BEFORE defect deadline fails (ledger at 10_000, deadline at 10_000 + 7,776,000)
+    let res = client.try_claim_retainage(&contractor, &1);
+    assert_eq!(res.err(), Some(Ok(BuildBondError::RetainageNotMature)));
+
+    // 5. Advance ledger time past defect period
+    let deadline = 10_000 + 90 * 86400;
+    env.ledger().set_timestamp(deadline + 1);
+
+    // Check claimable view
+    let claim_view = client.claimable(&contractor);
+    assert_eq!(claim_view.contractor_payable, 0);
+    assert_eq!(claim_view.retainage_claimable, 2_500);
+
+    // 6. Claim mature retainage
+    client.claim_retainage(&contractor, &1);
+
+    assert_eq!(token_client.balance(&contractor), 25_000); // 22,500 immediate + 2,500 retainage = 25,000 total!
+    assert_eq!(client.accounting().retainage_locked, 0);
+    assert_eq!(client.accounting().withdrawn, 25_000);
+
+    let m1_settled = client.milestone(&1);
+    assert_eq!(m1_settled.status, MilestoneStatus::Settled);
+    assert_eq!(m1_settled.retained_released, 2_500);
+
+    // 7. Duplicate retainage claim fails
+    let res = client.try_claim_retainage(&contractor, &1);
+    assert_eq!(res.err(), Some(Ok(BuildBondError::InvalidState)));
 }
