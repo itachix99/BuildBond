@@ -8,7 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "type-check": "tsc --noEmit",
-    "test": "tsx src/utils/stellar.test.ts"
+    "test": "tsx src/utils/stellar.test.ts && tsx src/utils/escrowWorkflow.test.ts"
   },
   "dependencies": {
     "@buildbond/shared": "*",

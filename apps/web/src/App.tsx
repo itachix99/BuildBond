@@ -1,162 +1,219 @@
 import React, { useState } from 'react';
 import { useFreighter } from './hooks/useFreighter';
 import { useAccountBalance } from './hooks/useAccountBalance';
+import { useEscrowWorkflow } from './hooks/useEscrowWorkflow';
 import { WalletConnect } from './components/WalletConnect';
 import { DirectPaymentModal } from './components/DirectPaymentModal';
-import { ProjectPreviewCard } from './components/ProjectPreviewCard';
-import { getExplorerTxUrl } from './utils/stellar';
+import { RoleSwitcher } from './components/RoleSwitcher';
+import { RoleAcceptanceCard } from './components/RoleAcceptanceCard';
+import { FundingWorkspace } from './components/FundingWorkspace';
+import { MilestoneList } from './components/MilestoneList';
+import { MilestoneEvidenceModal } from './components/MilestoneEvidenceModal';
+import { InspectionModal } from './components/InspectionModal';
+import { WithdrawalHub } from './components/WithdrawalHub';
+import { TransactionAuditDrawer } from './components/TransactionAuditDrawer';
+import { UIMilestone } from './types/escrow';
+
+type TabType = 'milestones' | 'acceptance' | 'funding' | 'payouts';
 
 export const App: React.FC = () => {
   const freighter = useFreighter();
   const balance = useAccountBalance(freighter.publicKey);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
-  const [recentTxHashes, setRecentTxHashes] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<TabType>('milestones');
 
-  const handlePaymentSuccess = (txHash: string) => {
-    setRecentTxHashes((prev) => [txHash, ...prev]);
-    balance.refresh();
-  };
+  const [activeEvidenceMilestone, setActiveEvidenceMilestone] = useState<UIMilestone | null>(null);
+  const [activeInspectionMilestone, setActiveInspectionMilestone] = useState<UIMilestone | null>(null);
+
+  const escrow = useEscrowWorkflow(freighter.publicKey);
 
   return (
     <div className="container">
-      {/* Header with Logo and Live Wallet Controls */}
+      {/* App Header */}
       <header className="header">
         <div className="logo-group">
           <div className="logo-badge">BB</div>
           <div>
             <h1 className="logo-title">BuildBond</h1>
             <p className="logo-subtitle">
-              Milestone Escrow, Retainage, and Dispute Resolution on Stellar
+              Milestone Escrow, Retainage & Defect Liability Settlement on Stellar
             </p>
           </div>
         </div>
 
-        <WalletConnect
-          isInstalled={freighter.isInstalled}
-          isConnected={freighter.isConnected}
-          publicKey={freighter.publicKey}
-          network={freighter.network}
-          isTestnet={freighter.isTestnet}
-          nativeBalance={balance.nativeBalance}
-          isLoading={freighter.isLoading}
-          isBalanceLoading={balance.isLoading}
-          error={freighter.error}
-          onConnect={freighter.connect}
-          onDisconnect={freighter.disconnect}
-          onRefresh={balance.refresh}
-        />
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setIsPaymentModalOpen(true)}
+            disabled={!freighter.isConnected}
+            style={{ fontSize: '0.8125rem' }}
+          >
+            Direct XLM Pay
+          </button>
+
+          <WalletConnect
+            isInstalled={freighter.isInstalled}
+            isConnected={freighter.isConnected}
+            publicKey={freighter.publicKey}
+            network={freighter.network}
+            isTestnet={freighter.isTestnet}
+            nativeBalance={balance.nativeBalance}
+            isLoading={freighter.isLoading}
+            isBalanceLoading={balance.isLoading}
+            error={freighter.error}
+            onConnect={freighter.connect}
+            onDisconnect={freighter.disconnect}
+            onRefresh={balance.refresh}
+          />
+        </div>
       </header>
 
-      {/* Main Content */}
-      <main style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-        {/* Level 1 Hero Payment Rail Action Card */}
-        <section
-          className="card"
-          style={{
-            borderLeft: '4px solid var(--accent-amber)',
-            background: 'linear-gradient(180deg, var(--bg-surface) 0%, var(--bg-surface-subtle) 100%)',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1.25rem' }}>
-            <div style={{ maxWidth: '720px' }}>
-              <div style={{ display: 'flex', gap: '0.625rem', marginBottom: '0.5rem' }}>
-                <span className="badge badge-amber">Level 1 Foundation</span>
-                <span className="badge badge-emerald">Verified Payment Rail</span>
-              </div>
-              <h2 style={{ fontSize: '1.35rem', fontWeight: 800, marginBottom: '0.5rem' }}>
-                Direct Stellar Testnet Settlement
-              </h2>
-              <p style={{ color: 'var(--text-secondary)', fontSize: '0.9375rem', lineHeight: 1.6 }}>
-                Connect your Freighter wallet, query live Testnet native XLM balances, and execute
-                verifiable Testnet transactions with step-by-step state tracking and direct Stellar
-                Expert explorer verification.
-              </p>
-            </div>
+      {/* Interactive Role Switcher & Clock Simulator */}
+      <RoleSwitcher
+        activeRole={escrow.activeRole}
+        onSelectRole={escrow.setActiveRole}
+        activePersona={escrow.activePersona}
+        activeAddress={escrow.activeAddress}
+        freighterAddress={freighter.publicKey}
+        useFreighterWallet={escrow.useFreighterWallet}
+        onToggleFreighter={escrow.setUseFreighterWallet}
+        simulatedTimeOffsetSecs={escrow.simulatedTimeOffsetSecs}
+        onFastForwardDays={escrow.fastForwardDays}
+        onResetDemo={escrow.resetDemo}
+      />
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', minWidth: '220px' }}>
-              <button
-                onClick={() => setIsPaymentModalOpen(true)}
-                disabled={!freighter.isConnected || !freighter.isTestnet}
-                className="btn btn-primary"
-                style={{ padding: '0.75rem 1.25rem', fontSize: '0.9375rem' }}
-              >
-                Send Testnet XLM Payment →
-              </button>
-              {!freighter.isConnected && (
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-                  Connect Freighter on Testnet to send
-                </span>
-              )}
-              {freighter.isConnected && !balance.isFunded && (
-                <a
-                  href="https://laboratory.stellar.org/#account-creator?network=test"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ fontSize: '0.75rem', color: 'var(--accent-amber)', textAlign: 'center' }}
-                >
-                  Unfunded account? Fund with Friendbot ↗
-                </a>
-              )}
-            </div>
+      {/* Active Escrow Project Banner */}
+      <section className="project-banner-card">
+        <div className="project-banner-main">
+          <div className="project-tags">
+            <span className="badge badge-blue">Soroban Escrow</span>
+            <span className={`status-pill ${escrow.project.status === 'Active' ? 'success' : escrow.project.status === 'Suspended' ? 'danger' : 'warning'}`}>
+              Status: {escrow.project.status}
+            </span>
+            <span className="badge badge-amber">{escrow.project.paymentTokenSymbol} Settlement</span>
           </div>
+          <h2 className="project-title">{escrow.project.title}</h2>
+          <div className="project-meta">
+            <span>📍 {escrow.project.location}</span>
+            <span>•</span>
+            <span>Contract: <code>{escrow.project.contractAddress.slice(0, 10)}...{escrow.project.contractAddress.slice(-6)}</code></span>
+            <span>•</span>
+            <span>Commitment: <strong>{escrow.project.totalCommitted.toLocaleString()} {escrow.project.paymentTokenSymbol}</strong></span>
+          </div>
+        </div>
 
-          {/* Recent Level 1 Transaction History */}
-          {recentTxHashes.length > 0 && (
-            <div
-              style={{
-                marginTop: '1.5rem',
-                paddingTop: '1.25rem',
-                borderTop: '1px solid var(--border-subtle)',
-              }}
-            >
-              <h4 style={{ fontSize: '0.8125rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-                RECENT TESTNET TRANSACTIONS IN THIS SESSION:
-              </h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                {recentTxHashes.map((hash) => (
-                  <div
-                    key={hash}
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      background: 'var(--bg-surface-elevated)',
-                      padding: '0.5rem 0.875rem',
-                      borderRadius: 'var(--radius-sm)',
-                      fontSize: '0.8125rem',
-                    }}
-                  >
-                    <span className="font-mono" style={{ color: 'var(--accent-emerald)' }}>
-                      ✓ {hash.slice(0, 16)}...{hash.slice(-8)}
-                    </span>
-                    <a
-                      href={getExplorerTxUrl(hash)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="badge badge-blue"
-                      style={{ textDecoration: 'none' }}
-                    >
-                      View on Stellar Expert ↗
-                    </a>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </section>
+        {/* Tab Navigation */}
+        <div className="tab-navigation">
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'milestones' ? 'active' : ''}`}
+            onClick={() => setActiveTab('milestones')}
+          >
+            📋 Milestones ({escrow.project.milestones.length})
+          </button>
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'acceptance' ? 'active' : ''}`}
+            onClick={() => setActiveTab('acceptance')}
+          >
+            ✍️ Role Signatures
+          </button>
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'funding' ? 'active' : ''}`}
+            onClick={() => setActiveTab('funding')}
+          >
+            💎 Escrow & Coverage ({escrow.project.accounting.deposited.toLocaleString()} {escrow.project.paymentTokenSymbol})
+          </button>
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'payouts' ? 'active' : ''}`}
+            onClick={() => setActiveTab('payouts')}
+          >
+            💰 Payouts & Retainage ({escrow.project.accounting.contractorPayable.toLocaleString()} {escrow.project.paymentTokenSymbol})
+          </button>
+        </div>
+      </section>
 
-        {/* Interactive BuildBond Escrow Preview Model */}
-        <ProjectPreviewCard connectedAddress={freighter.publicKey} />
+      {/* Main Tab Views */}
+      <main className="tab-content">
+        {activeTab === 'milestones' && (
+          <MilestoneList
+            project={escrow.project}
+            activeRole={escrow.activeRole}
+            simulatedLedgerTimestamp={escrow.simulatedLedgerTimestamp}
+            onOpenEvidenceModal={setActiveEvidenceMilestone}
+            onOpenInspectionModal={setActiveInspectionMilestone}
+            onClaimRetainage={escrow.claimRetainage}
+            isBusy={escrow.isBusy}
+          />
+        )}
+
+        {activeTab === 'acceptance' && (
+          <RoleAcceptanceCard
+            project={escrow.project}
+            activeRole={escrow.activeRole}
+            onAcceptRole={escrow.acceptRole}
+            onDeclineRole={escrow.declineRole}
+            isBusy={escrow.isBusy}
+          />
+        )}
+
+        {activeTab === 'funding' && (
+          <FundingWorkspace
+            project={escrow.project}
+            activeRole={escrow.activeRole}
+            onDeposit={escrow.depositFunds}
+            isBusy={escrow.isBusy}
+          />
+        )}
+
+        {activeTab === 'payouts' && (
+          <WithdrawalHub
+            project={escrow.project}
+            activeRole={escrow.activeRole}
+            simulatedLedgerTimestamp={escrow.simulatedLedgerTimestamp}
+            onWithdrawEarned={escrow.withdrawEarned}
+            onClaimRetainage={escrow.claimRetainage}
+            onFastForwardDays={escrow.fastForwardDays}
+            isBusy={escrow.isBusy}
+          />
+        )}
       </main>
 
-      {/* Direct Payment Modal */}
+      {/* Contractor Evidence Submission Modal */}
+      {activeEvidenceMilestone && (
+        <MilestoneEvidenceModal
+          milestone={activeEvidenceMilestone}
+          onClose={() => setActiveEvidenceMilestone(null)}
+          onSubmit={escrow.submitMilestone}
+          isBusy={escrow.isBusy}
+        />
+      )}
+
+      {/* Independent Inspector Certification Modal */}
+      {activeInspectionMilestone && (
+        <InspectionModal
+          project={escrow.project}
+          milestone={activeInspectionMilestone}
+          onClose={() => setActiveInspectionMilestone(null)}
+          onInspect={escrow.inspectMilestone}
+          isBusy={escrow.isBusy}
+        />
+      )}
+
+      {/* Direct Level 1 Payment Rail Modal */}
       <DirectPaymentModal
         isOpen={isPaymentModalOpen}
         onClose={() => setIsPaymentModalOpen(false)}
         sourcePublicKey={freighter.publicKey}
         availableBalance={balance.nativeBalance}
-        onPaymentSuccess={handlePaymentSuccess}
+        onPaymentSuccess={() => balance.refresh()}
       />
+
+      {/* On-Chain Transaction Audit Drawer */}
+      <TransactionAuditDrawer logs={escrow.logs} />
     </div>
   );
 };
