@@ -139,6 +139,12 @@ All token amounts are returned as decimal strings. The API has no write or trans
 routes. To connect the web dashboard to it, set `VITE_INDEXER_API_URL=http://127.0.0.1:8787` before
 starting `@buildbond/web`; without that variable the local simulator remains the only project source.
 
+When an indexed project is selected, the dashboard lazy-loads the generated escrow bindings and
+reads `project`, `accounting`, and `coverage` directly from Soroban RPC. Set
+`VITE_STELLAR_RPC_URL` when using a non-default RPC endpoint. The dashboard compares the direct
+commitment with the indexed commitment and surfaces mismatches; it never uses the indexer to
+authorize payments or silently overwrite the simulator.
+
 The indexer is a convenience read model, not payment authority. Security-sensitive screens must
 reconcile balances and lifecycle state against direct contract reads. Use a durable filesystem
 path or replace `FileEventStore` with a transactional database adapter for multi-process or

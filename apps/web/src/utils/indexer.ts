@@ -13,6 +13,35 @@ export interface IndexedProjectSummary {
   escrowWasmHash?: string;
 }
 
+export interface IndexedEventSummary {
+  id: string;
+  contractAddress: string;
+  eventType: string;
+  ledger: number;
+  ledgerClosedAt: string;
+  txHash: string;
+  payload: Record<string, unknown>;
+  indexedAt: number;
+}
+
+export interface IndexedAuditSummary {
+  contractAddress: string;
+  eventsCount: number;
+  totalDeposited: string;
+  totalAllocated: string;
+  totalPaid: string;
+  totalRetainageClaimed: string;
+  totalRefunded: string;
+  totalDisputed: string;
+  events: IndexedEventSummary[];
+}
+
+export interface IndexedProjectDetails {
+  project: IndexedProjectSummary;
+  events: IndexedEventSummary[];
+  audit: IndexedAuditSummary;
+}
+
 interface ProjectDirectoryResponse {
   projects: IndexedProjectSummary[];
 }
@@ -37,6 +66,22 @@ export async function fetchIndexedProjects(
   const body = (await response.json()) as ProjectDirectoryResponse;
   if (!body || !Array.isArray(body.projects)) throw new Error('Indexer returned an invalid project directory');
   return body.projects;
+}
+
+export async function fetchIndexedProjectDetails(
+  project: IndexedProjectSummary,
+  signal?: AbortSignal
+): Promise<IndexedProjectDetails> {
+  const baseUrl = configuredIndexerUrl();
+  if (!baseUrl) throw new Error('Indexer API is not configured');
+  const url = `${baseUrl}/projects/${encodeURIComponent(project.factoryAddress)}/${project.projectId}`;
+  const response = await fetch(url, { signal });
+  if (!response.ok) throw new Error(`Indexer project detail query failed (${response.status})`);
+  const body = (await response.json()) as IndexedProjectDetails;
+  if (!body?.project || !Array.isArray(body.events) || !body.audit) {
+    throw new Error('Indexer returned an invalid project detail response');
+  }
+  return body;
 }
 
 export function isIndexerConfigured(): boolean {

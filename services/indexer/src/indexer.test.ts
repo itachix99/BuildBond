@@ -320,6 +320,18 @@ async function runTests() {
     if (auditResponse.status !== 200) {
       throw new Error('Indexer API project audit route failed');
     }
+
+    const detailResponse = await fetch(
+      `${apiBaseUrl}/projects/${encodeURIComponent(decodedProject.contractAddress)}/7`
+    );
+    const detail = await detailResponse.json() as {
+      project: { escrowAddress: string };
+      events: IndexedEvent[];
+      audit: { eventsCount: number };
+    };
+    if (!detailResponse.ok || detail.project.escrowAddress !== contractAddress || detail.events.length !== 5 || detail.audit.eventsCount !== 5) {
+      throw new Error('Indexer API project detail response failed');
+    }
     console.log('✓ Read-only indexer API serves health, participant projects, filtered events, and audit routes.');
   } finally {
     await api.stop();

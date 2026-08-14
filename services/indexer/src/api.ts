@@ -143,7 +143,11 @@ export class IndexerApiServer {
     }
 
     if (path.length === 2) {
-      this.writeJson(response, 200, { project });
+      const [events, audit] = await Promise.all([
+        this.store.getEventsByContract(project.escrowAddress, { order: 'desc', limit: 100 }),
+        buildProjectAuditTrail(this.store, project.escrowAddress),
+      ]);
+      this.writeJson(response, 200, { project, events, audit });
       return;
     }
 

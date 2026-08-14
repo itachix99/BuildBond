@@ -4,13 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prebuild": "npm run build --workspace=@buildbond/contract-bindings",
     "dev": "vite",
     "build": "tsc && vite build",
+    "pretype-check": "npm run build --workspace=@buildbond/contract-bindings",
     "preview": "vite preview",
     "type-check": "tsc --noEmit",
-    "test": "tsx src/utils/stellar.test.ts && tsx src/utils/escrowWorkflow.test.ts"
+    "test": "tsx src/utils/stellar.test.ts && tsx src/utils/escrowWorkflow.test.ts && tsx src/utils/reconciliation.test.ts"
   },
   "dependencies": {
+    "@buildbond/contract-bindings": "*",
     "@buildbond/shared": "*",
     "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "^15.1.0",

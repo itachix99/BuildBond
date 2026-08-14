@@ -18,7 +18,10 @@ import { OpenDisputeModal } from './components/OpenDisputeModal';
 import { ArbitrationModal } from './components/ArbitrationModal';
 import { TransactionAuditDrawer } from './components/TransactionAuditDrawer';
 import { IndexedProjectDirectory } from './components/IndexedProjectDirectory';
+import { ContractReconciliationCard } from './components/ContractReconciliationCard';
 import { useProjectDirectory } from './hooks/useProjectDirectory';
+import { useIndexedProjectDetails } from './hooks/useIndexedProjectDetails';
+import { useContractReconciliation } from './hooks/useContractReconciliation';
 import { UIDispute, UIMilestone } from './types/escrow';
 
 type TabType = 'milestones' | 'acceptance' | 'funding' | 'payouts' | 'disputes';
@@ -34,9 +37,15 @@ export const App: React.FC = () => {
   const [activeInspectionMilestone, setActiveInspectionMilestone] = useState<UIMilestone | null>(null);
   const [activeDisputeMilestone, setActiveDisputeMilestone] = useState<UIMilestone | null>(null);
   const [activeArbitrationDispute, setActiveArbitrationDispute] = useState<UIDispute | null>(null);
+  const [selectedIndexedProjectKey, setSelectedIndexedProjectKey] = useState<string | undefined>();
 
   const escrow = useEscrowWorkflow(freighter.publicKey);
   const projectDirectory = useProjectDirectory(escrow.activeAddress);
+  const selectedIndexedProject = projectDirectory.projects.find(
+    project => `${project.factoryAddress}:${project.projectId}` === selectedIndexedProjectKey
+  );
+  const indexedDetails = useIndexedProjectDetails(selectedIndexedProject);
+  const reconciliation = useContractReconciliation(selectedIndexedProject?.escrowAddress);
   const openDisputesCount = Object.values(escrow.project.disputes).filter(d => d.status === 'Open').length;
 
   return (
@@ -109,6 +118,17 @@ export const App: React.FC = () => {
         isLoading={projectDirectory.isLoading}
         configured={projectDirectory.configured}
         error={projectDirectory.error}
+        selectedProjectKey={selectedIndexedProjectKey}
+        details={indexedDetails.details}
+        detailsLoading={indexedDetails.isLoading}
+        detailsError={indexedDetails.error}
+        onSelectProject={project => setSelectedIndexedProjectKey(`${project.factoryAddress}:${project.projectId}`)}
+      />
+      <ContractReconciliationCard
+        indexedProject={selectedIndexedProject}
+        state={reconciliation.state}
+        isLoading={reconciliation.isLoading}
+        error={reconciliation.error}
       />
 
       {/* Active Escrow Project Banner */}

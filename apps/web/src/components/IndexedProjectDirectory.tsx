@@ -1,5 +1,5 @@
 import React from 'react';
-import { IndexedProjectSummary } from '../utils/indexer';
+import { IndexedProjectDetails, IndexedProjectSummary } from '../utils/indexer';
 
 interface IndexedProjectDirectoryProps {
   projects: IndexedProjectSummary[];
@@ -7,6 +7,11 @@ interface IndexedProjectDirectoryProps {
   isLoading: boolean;
   configured: boolean;
   error: string | null;
+  selectedProjectKey?: string;
+  details: IndexedProjectDetails | null;
+  detailsLoading: boolean;
+  detailsError: string | null;
+  onSelectProject: (project: IndexedProjectSummary) => void;
 }
 
 function shortAddress(address: string): string {
@@ -27,6 +32,11 @@ export const IndexedProjectDirectory: React.FC<IndexedProjectDirectoryProps> = (
   isLoading,
   configured,
   error,
+  selectedProjectKey,
+  details,
+  detailsLoading,
+  detailsError,
+  onSelectProject,
 }) => {
   if (!configured) return null;
 
@@ -66,9 +76,18 @@ export const IndexedProjectDirectory: React.FC<IndexedProjectDirectoryProps> = (
       {projects.length > 0 && (
         <div style={{ display: 'grid', gap: '0.5rem', marginTop: '0.6rem' }}>
           {projects.map(project => (
-            <div
+            <button
+              type="button"
               key={`${project.factoryAddress}:${project.projectId}`}
+              onClick={() => onSelectProject(project)}
+              aria-pressed={selectedProjectKey === `${project.factoryAddress}:${project.projectId}`}
               style={{
+                textAlign: 'left',
+                color: 'inherit',
+                background: selectedProjectKey === `${project.factoryAddress}:${project.projectId}`
+                  ? 'var(--bg-surface-elevated)'
+                  : 'transparent',
+                cursor: 'pointer',
                 display: 'grid',
                 gridTemplateColumns: 'minmax(0, 1fr) auto',
                 gap: '0.5rem 1rem',
@@ -86,8 +105,36 @@ export const IndexedProjectDirectory: React.FC<IndexedProjectDirectoryProps> = (
               <strong style={{ whiteSpace: 'nowrap', fontSize: '0.8125rem' }}>
                 {formatCommitted(project.totalCommitted)} committed units
               </strong>
-            </div>
+            </button>
           ))}
+        </div>
+      )}
+
+      {selectedProjectKey && (
+        <div style={{ marginTop: '0.75rem', borderTop: '1px solid var(--border-subtle)', paddingTop: '0.75rem' }}>
+          {detailsLoading && <div style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>Loading indexed project detail…</div>}
+          {detailsError && <div role="alert" style={{ color: 'var(--accent-amber)', fontSize: '0.8125rem' }}>{detailsError}</div>}
+          {details && (
+            <>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', fontSize: '0.75rem' }}>
+                <span className="badge badge-amber">Indexed activity: {details.audit.eventsCount} events</span>
+                <span className="badge badge-amber">Deposited: {formatCommitted(details.audit.totalDeposited)}</span>
+                <span className="badge badge-amber">Paid: {formatCommitted(details.audit.totalPaid)}</span>
+                <span className="badge badge-amber">Disputed: {formatCommitted(details.audit.totalDisputed)}</span>
+              </div>
+              <div style={{ marginTop: '0.6rem', display: 'grid', gap: '0.35rem' }}>
+                {details.events.slice(0, 6).map(event => (
+                  <div key={event.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                    <span><strong>{event.eventType}</strong> · ledger {event.ledger}</span>
+                    <code>{event.txHash.slice(0, 10)}…</code>
+                  </div>
+                ))}
+              </div>
+              <div style={{ marginTop: '0.55rem', color: 'var(--text-muted)', fontSize: '0.7rem' }}>
+                Indexed activity is a convenience read model; balances and authorization remain subject to direct contract reconciliation below.
+              </div>
+            </>
+          )}
         </div>
       )}
     </section>
