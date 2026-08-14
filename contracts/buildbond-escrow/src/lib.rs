@@ -10,14 +10,14 @@ pub mod test;
 use events::{
     emit_dispute_opened, emit_dispute_resolved, emit_inspection_recorded, emit_milestone_approved,
     emit_milestone_funded, emit_milestone_submitted, emit_payment_withdrawn,
-    emit_project_activated, emit_project_created, emit_project_funded, emit_refund_withdrawn,
-    emit_retainage_claimed, emit_role_accepted, emit_role_declined,
+    emit_project_activated, emit_project_completed, emit_project_created, emit_project_funded,
+    emit_refund_withdrawn, emit_retainage_claimed, emit_role_accepted, emit_role_declined,
 };
 use storage::{
     get_accounting, get_dispute, get_milestone, get_milestone_count, get_role_acceptance,
     get_role_address, get_status, get_terms, get_unallocated_funds, is_initialized, set_accounting,
     set_dispute, set_initialized, set_milestone, set_milestone_count, set_role_acceptance,
-    set_status, set_terms,
+    set_status, set_terms, DataKey,
 };
 use types::{
     AcceptanceView, Accounting, BuildBondError, ClaimableView, CoverageView, DisputeRecord,
@@ -50,11 +50,33 @@ fn validate_accounting(accounting: &Accounting) -> Result<(), BuildBondError> {
     Ok(())
 }
 
+/// Moves an active project to its terminal completed state once every milestone is settled.
+fn maybe_complete_project(env: &Env) -> Result<(), BuildBondError> {
+    if get_status(env)? != ProjectStatus::Active {
+        return Ok(());
+    }
+
+    let milestone_count = get_milestone_count(env);
+    if milestone_count == 0 {
+        return Ok(());
+    }
+
+    for id in 1..=milestone_count {
+        if get_milestone(env, id)?.status != MilestoneStatus::Settled {
+            return Ok(());
+        }
+    }
+
+    set_status(env, &ProjectStatus::Completed);
+    emit_project_completed(env, env.ledger().timestamp());
+    Ok(())
+}
+
 #[contractimpl]
 impl BuildBondEscrowContract {
     /// Returns the contract version symbol
     pub fn version(_env: Env) -> Symbol {
-        symbol_short!("v0_1_1")
+        symbol_short!("v0_1_2")
     }
 
     /// Initializes a dedicated project escrow with agreed terms and milestone schedule
@@ -169,7 +191,10 @@ impl BuildBondEscrowContract {
         }
 
         let status = get_status(&env)?;
-        if status != ProjectStatus::AwaitingAcceptance && status != ProjectStatus::AwaitingFunding {
+        if status != ProjectStatus::AwaitingAcceptance
+            && status != ProjectStatus::AwaitingFunding
+            && status != ProjectStatus::Suspended
+        {
             return Err(BuildBondError::InvalidState);
         }
 
@@ -189,6 +214,11 @@ impl BuildBondEscrowContract {
             if existing.accepted {
                 return Err(BuildBondError::RoleAlreadyAccepted);
             }
+            if status == ProjectStatus::Suspended && !existing.declined {
+                return Err(BuildBondError::InvalidState);
+            }
+        } else if status == ProjectStatus::Suspended {
+            return Err(BuildBondError::InvalidState);
         }
 
         let acceptance = AcceptanceView {
@@ -202,7 +232,48 @@ impl BuildBondEscrowContract {
         };
 
         set_role_acceptance(&env, role, &acceptance);
+        if status == ProjectStatus::Suspended {
+            set_status(&env, &ProjectStatus::AwaitingAcceptance);
+        }
         emit_role_accepted(&env, role, &actor, &terms_hash, env.ledger().timestamp());
+
+        Ok(())
+    }
+
+    /// Extends the lifetime of the project instance and all durable milestone/dispute records.
+    /// Only the project owner may renew storage, and the requested lifetime is bounded by the
+    /// network maximum TTL to avoid creating unbounded retention obligations.
+    pub fn extend_ttl(
+        env: Env,
+        owner: Address,
+        threshold: u32,
+        extend_to: u32,
+    ) -> Result<(), BuildBondError> {
+        if !is_initialized(&env) {
+            return Err(BuildBondError::NotInitialized);
+        }
+        owner.require_auth();
+
+        let terms = get_terms(&env)?;
+        if owner != terms.owner {
+            return Err(BuildBondError::Unauthorized);
+        }
+        if threshold == 0 || extend_to <= threshold || extend_to > env.storage().max_ttl() {
+            return Err(BuildBondError::InvalidTimestamp);
+        }
+
+        env.storage().instance().extend_ttl(threshold, extend_to);
+        let milestone_count = get_milestone_count(&env);
+        for i in 1..=milestone_count {
+            env.storage()
+                .persistent()
+                .extend_ttl(&DataKey::Milestone(i), threshold, extend_to);
+            if env.storage().persistent().has(&DataKey::Dispute(i)) {
+                env.storage()
+                    .persistent()
+                    .extend_ttl(&DataKey::Dispute(i), threshold, extend_to);
+            }
+        }
 
         Ok(())
     }
@@ -776,6 +847,8 @@ impl BuildBondEscrowContract {
             env.ledger().timestamp(),
         );
 
+        maybe_complete_project(&env)?;
+
         Ok(())
     }
 
@@ -1013,6 +1086,8 @@ impl BuildBondEscrowContract {
             &report_hash,
             env.ledger().timestamp(),
         );
+
+        maybe_complete_project(&env)?;
 
         Ok(())
     }

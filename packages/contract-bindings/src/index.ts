@@ -215,6 +215,7 @@ export enum InspectionDecision {
 
 
 
+
 export type DataKey = {tag: "Initialized", values: void} | {tag: "Terms", values: void} | {tag: "Status", values: void} | {tag: "Accounting", values: void} | {tag: "MilestoneCount", values: void} | {tag: "Milestone", values: readonly [u32]} | {tag: "RoleAcceptance", values: readonly [Role]} | {tag: "Dispute", values: readonly [u32]};
 
 export interface Client {
@@ -265,6 +266,14 @@ export interface Client {
    * Construct and simulate a accounting transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    */
   accounting: (options?: MethodOptions) => Promise<AssembledTransaction<Result<Accounting>>>
+
+  /**
+   * Construct and simulate a extend_ttl transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Extends the lifetime of the project instance and all durable milestone/dispute records.
+   * Only the project owner may renew storage, and the requested lifetime is bounded by the
+   * network maximum TTL to avoid creating unbounded retention obligations.
+   */
+  extend_ttl: ({owner, threshold, extend_to}: {owner: string, threshold: u32, extend_to: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
 
   /**
    * Construct and simulate a initialize transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
@@ -364,6 +373,7 @@ export class Client extends ContractClient {
         "AAAAAAAAAAAAAAAJY2xhaW1hYmxlAAAAAAAAAQAAAAAAAAAHYWRkcmVzcwAAAAATAAAAAQAAA+kAAAfQAAAADUNsYWltYWJsZVZpZXcAAAAAAAfQAAAADkJ1aWxkQm9uZEVycm9yAAA=",
         "AAAAAAAAAAAAAAAJbWlsZXN0b25lAAAAAAAAAQAAAAAAAAACaWQAAAAAAAQAAAABAAAD6QAAB9AAAAAJTWlsZXN0b25lAAAAAAAH0AAAAA5CdWlsZEJvbmRFcnJvcgAA",
         "AAAAAAAAAAAAAAAKYWNjb3VudGluZwAAAAAAAAAAAAEAAAPpAAAH0AAAAApBY2NvdW50aW5nAAAAAAfQAAAADkJ1aWxkQm9uZEVycm9yAAA=",
+        "AAAAAAAAAPVFeHRlbmRzIHRoZSBsaWZldGltZSBvZiB0aGUgcHJvamVjdCBpbnN0YW5jZSBhbmQgYWxsIGR1cmFibGUgbWlsZXN0b25lL2Rpc3B1dGUgcmVjb3Jkcy4KT25seSB0aGUgcHJvamVjdCBvd25lciBtYXkgcmVuZXcgc3RvcmFnZSwgYW5kIHRoZSByZXF1ZXN0ZWQgbGlmZXRpbWUgaXMgYm91bmRlZCBieSB0aGUKbmV0d29yayBtYXhpbXVtIFRUTCB0byBhdm9pZCBjcmVhdGluZyB1bmJvdW5kZWQgcmV0ZW50aW9uIG9ibGlnYXRpb25zLgAAAAAAAApleHRlbmRfdHRsAAAAAAADAAAAAAAAAAVvd25lcgAAAAAAABMAAAAAAAAACXRocmVzaG9sZAAAAAAAAAQAAAAAAAAACWV4dGVuZF90bwAAAAAAAAQAAAABAAAD6QAAAAIAAAfQAAAADkJ1aWxkQm9uZEVycm9yAAA=",
         "AAAAAAAAAE9Jbml0aWFsaXplcyBhIGRlZGljYXRlZCBwcm9qZWN0IGVzY3JvdyB3aXRoIGFncmVlZCB0ZXJtcyBhbmQgbWlsZXN0b25lIHNjaGVkdWxlAAAAAAppbml0aWFsaXplAAAAAAACAAAAAAAAAAV0ZXJtcwAAAAAAB9AAAAAMUHJvamVjdFRlcm1zAAAAAAAAAAptaWxlc3RvbmVzAAAAAAPqAAAH0AAAAA5NaWxlc3RvbmVJbnB1dAAAAAAAAQAAA+kAAAACAAAH0AAAAA5CdWlsZEJvbmRFcnJvcgAA",
         "AAAAAAAAAElFeHBsaWNpdCBvbi1jaGFpbiBjcnlwdG9ncmFwaGljIHJvbGUgYWNjZXB0YW5jZSBib3VuZCB0byBleGFjdCB0ZXJtcyBoYXNoAAAAAAAAC2FjY2VwdF9yb2xlAAAAAAMAAAAAAAAABWFjdG9yAAAAAAAAEwAAAAAAAAAEcm9sZQAAB9AAAAAEUm9sZQAAAAAAAAAKdGVybXNfaGFzaAAAAAAD7gAAACAAAAABAAAD6QAAAAIAAAfQAAAADkJ1aWxkQm9uZEVycm9yAAA=",
         "AAAAAAAAADpFeHBsaWNpdCBvbi1jaGFpbiByb2xlIGRlY2xpbmUgd2l0aCBkb2N1bWVudGVkIHJlYXNvbiBoYXNoAAAAAAAMZGVjbGluZV9yb2xlAAAAAwAAAAAAAAAFYWN0b3IAAAAAAAATAAAAAAAAAARyb2xlAAAH0AAAAARSb2xlAAAAAAAAAAtyZWFzb25faGFzaAAAAAPuAAAAIAAAAAEAAAPpAAAAAgAAB9AAAAAOQnVpbGRCb25kRXJyb3IAAA==",
@@ -402,6 +412,7 @@ export class Client extends ContractClient {
         "AAAABQAAAAAAAAAAAAAAFFJlZnVuZFdpdGhkcmF3bkV2ZW50AAAAAQAAABZyZWZ1bmRfd2l0aGRyYXduX2V2ZW50AAAAAAADAAAAAAAAAAVvd25lcgAAAAAAABMAAAAAAAAAAAAAAAZhbW91bnQAAAAAAAsAAAAAAAAAAAAAAAl0aW1lc3RhbXAAAAAAAAAGAAAAAAAAAAI=",
         "AAAABQAAAAAAAAAAAAAAFVBheW1lbnRXaXRoZHJhd25FdmVudAAAAAAAAAEAAAAXcGF5bWVudF93aXRoZHJhd25fZXZlbnQAAAAAAwAAAAAAAAALYmVuZWZpY2lhcnkAAAAAEwAAAAAAAAAAAAAABmFtb3VudAAAAAAACwAAAAAAAAAAAAAACXRpbWVzdGFtcAAAAAAAAAYAAAAAAAAAAg==",
         "AAAABQAAAAAAAAAAAAAAFVByb2plY3RBY3RpdmF0ZWRFdmVudAAAAAAAAAEAAAAXcHJvamVjdF9hY3RpdmF0ZWRfZXZlbnQAAAAAAgAAAAAAAAAGY2FsbGVyAAAAAAATAAAAAAAAAAAAAAAJdGltZXN0YW1wAAAAAAAABgAAAAAAAAAC",
+        "AAAABQAAAAAAAAAAAAAAFVByb2plY3RDb21wbGV0ZWRFdmVudAAAAAAAAAEAAAAXcHJvamVjdF9jb21wbGV0ZWRfZXZlbnQAAAAAAQAAAAAAAAAJdGltZXN0YW1wAAAAAAAABgAAAAAAAAAC",
         "AAAABQAAAAAAAAAAAAAAFVJldGFpbmFnZUNsYWltZWRFdmVudAAAAAAAAAEAAAAXcmV0YWluYWdlX2NsYWltZWRfZXZlbnQAAAAABAAAAAAAAAAMbWlsZXN0b25lX2lkAAAABAAAAAAAAAAAAAAACmNvbnRyYWN0b3IAAAAAABMAAAAAAAAAAAAAAAZhbW91bnQAAAAAAAsAAAAAAAAAAAAAAAl0aW1lc3RhbXAAAAAAAAAGAAAAAAAAAAI=",
         "AAAABQAAAAAAAAAAAAAAFk1pbGVzdG9uZUFwcHJvdmVkRXZlbnQAAAAAAAEAAAAYbWlsZXN0b25lX2FwcHJvdmVkX2V2ZW50AAAABQAAAAAAAAAMbWlsZXN0b25lX2lkAAAABAAAAAAAAAAAAAAAEGltbWVkaWF0ZV9hbW91bnQAAAALAAAAAAAAAAAAAAAQcmV0YWluYWdlX2Ftb3VudAAAAAsAAAAAAAAAAAAAABJkZWZlY3RfZGVhZGxpbmVfYXQAAAAAAAYAAAAAAAAAAAAAAAl0aW1lc3RhbXAAAAAAAAAGAAAAAAAAAAI=",
         "AAAABQAAAAAAAAAAAAAAF0luc3BlY3Rpb25SZWNvcmRlZEV2ZW50AAAAAAEAAAAZaW5zcGVjdGlvbl9yZWNvcmRlZF9ldmVudAAAAAAAAAUAAAAAAAAADG1pbGVzdG9uZV9pZAAAAAQAAAAAAAAAAAAAAAlpbnNwZWN0b3IAAAAAAAATAAAAAAAAAAAAAAAIZGVjaXNpb24AAAAEAAAAAAAAAAAAAAALcmVwb3J0X2hhc2gAAAAD7gAAACAAAAAAAAAAAAAAAAl0aW1lc3RhbXAAAAAAAAAGAAAAAAAAAAI=",
@@ -420,6 +431,7 @@ export class Client extends ContractClient {
         claimable: this.txFromJSON<Result<ClaimableView>>,
         milestone: this.txFromJSON<Result<Milestone>>,
         accounting: this.txFromJSON<Result<Accounting>>,
+        extend_ttl: this.txFromJSON<Result<void>>,
         initialize: this.txFromJSON<Result<void>>,
         accept_role: this.txFromJSON<Result<void>>,
         decline_role: this.txFromJSON<Result<void>>,

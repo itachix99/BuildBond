@@ -277,6 +277,101 @@ fn test_role_decline() {
 
     let project = client.project();
     assert_eq!(project.status, ProjectStatus::Suspended);
+
+    // A declined role can explicitly re-accept the unchanged terms to resume the proposal.
+    client.accept_role(&inspector, &Role::Inspector, &terms.terms_hash);
+    assert_eq!(client.project().status, ProjectStatus::AwaitingAcceptance);
+    let resumed = client.role_acceptance(&Role::Inspector).unwrap();
+    assert!(resumed.accepted);
+    assert!(!resumed.declined);
+}
+
+#[test]
+fn test_project_completes_after_all_milestones_settle() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_000);
+
+    let contract_id = env.register(BuildBondEscrowContract, ());
+    let client = BuildBondEscrowContractClient::new(&env, &contract_id);
+    let (terms, owner, contractor, inspector, arbiter, _, token_client) =
+        create_test_terms(&env, FundingPolicy::FullyFunded);
+
+    client.initialize(&terms, &create_test_milestones(&env));
+    token_client.mint(&owner, &60_000);
+    client.deposit(&owner, &60_000);
+    client.accept_role(&contractor, &Role::Contractor, &terms.terms_hash);
+    client.accept_role(&inspector, &Role::Inspector, &terms.terms_hash);
+    client.accept_role(&arbiter, &Role::Arbiter, &terms.terms_hash);
+    client.activate(&owner);
+
+    client.submit_milestone(&contractor, &1, &BytesN::random(&env));
+    client.inspect_milestone(
+        &inspector,
+        &1,
+        &InspectionDecision::Approve,
+        &BytesN::random(&env),
+    );
+    client.submit_milestone(&contractor, &2, &BytesN::random(&env));
+    client.inspect_milestone(
+        &inspector,
+        &2,
+        &InspectionDecision::Approve,
+        &BytesN::random(&env),
+    );
+    assert_eq!(client.project().status, ProjectStatus::Active);
+
+    env.ledger().set_timestamp(1_000 + 90 * 86400 + 1);
+    client.claim_retainage(&contractor, &1);
+    assert_eq!(client.project().status, ProjectStatus::Active);
+    client.claim_retainage(&contractor, &2);
+    assert_eq!(client.project().status, ProjectStatus::Completed);
+}
+
+#[test]
+fn test_owner_can_extend_instance_and_persistent_storage_ttl() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(BuildBondEscrowContract, ());
+    let client = BuildBondEscrowContractClient::new(&env, &contract_id);
+    let (terms, owner, contractor, _inspector, _arbiter, _, _) =
+        create_test_terms(&env, FundingPolicy::FullyFunded);
+    client.initialize(&terms, &create_test_milestones(&env));
+    // Let the entries age so the renewal call has observable work to do.
+    env.ledger().set_sequence_number(1_000);
+
+    let instance_before = env.as_contract(&contract_id, || {
+        use soroban_sdk::testutils::storage::Instance as _;
+        env.storage().instance().get_ttl()
+    });
+    let milestone_before = env.as_contract(&contract_id, || {
+        use soroban_sdk::testutils::storage::Persistent as _;
+        env.storage()
+            .persistent()
+            .get_ttl(&crate::storage::DataKey::Milestone(1))
+    });
+
+    let extend_to = env.storage().max_ttl();
+    let unauthorized = client.try_extend_ttl(&contractor, &10_000, &extend_to);
+    assert_eq!(unauthorized.err(), Some(Ok(BuildBondError::Unauthorized)));
+    client.extend_ttl(&owner, &10_000, &extend_to);
+
+    let instance_after = env.as_contract(&contract_id, || {
+        use soroban_sdk::testutils::storage::Instance as _;
+        env.storage().instance().get_ttl()
+    });
+    let milestone_after = env.as_contract(&contract_id, || {
+        use soroban_sdk::testutils::storage::Persistent as _;
+        env.storage()
+            .persistent()
+            .get_ttl(&crate::storage::DataKey::Milestone(1))
+    });
+    assert!(instance_after > instance_before);
+    assert!(milestone_after > milestone_before);
+
+    let invalid = client.try_extend_ttl(&owner, &0, &extend_to);
+    assert_eq!(invalid.err(), Some(Ok(BuildBondError::InvalidTimestamp)));
 }
 
 #[test]

@@ -38,6 +38,12 @@ pub struct ProjectActivatedEvent {
 
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProjectCompletedEvent {
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectFundedEvent {
     pub funder: Address,
     pub amount: i128,
@@ -157,6 +163,10 @@ pub fn emit_project_activated(env: &Env, caller: &Address, timestamp: u64) {
         timestamp,
     }
     .publish(env);
+}
+
+pub fn emit_project_completed(env: &Env, timestamp: u64) {
+    ProjectCompletedEvent { timestamp }.publish(env);
 }
 
 pub fn emit_project_funded(
