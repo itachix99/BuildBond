@@ -66,21 +66,19 @@ export function useFreighter() {
       }
 
       // 3. Get network details
-      let networkName = 'TESTNET';
-      let networkPassphrase = NETWORK_PASSPHRASE_TESTNET;
+      let networkName = 'UNKNOWN';
+      let networkPassphrase = '';
       try {
         const netDetails = await getNetworkDetails();
         if (netDetails) {
-          networkName = (netDetails as any).network || 'TESTNET';
-          networkPassphrase = (netDetails as any).networkPassphrase || NETWORK_PASSPHRASE_TESTNET;
+          networkName = (netDetails as any).network || 'UNKNOWN';
+          networkPassphrase = (netDetails as any).networkPassphrase || '';
         }
       } catch (err) {
-        console.warn('Could not fetch Freighter network details:', err);
+        console.warn('Could not verify Freighter network details:', err);
       }
 
-      const isTestnet =
-        networkPassphrase === NETWORK_PASSPHRASE_TESTNET ||
-        networkName.toUpperCase().includes('TESTNET');
+      const isTestnet = networkPassphrase === NETWORK_PASSPHRASE_TESTNET;
 
       setState({
         isInstalled: true,
@@ -118,21 +116,19 @@ export function useFreighter() {
         throw new Error('Please log in and allow connection in the Freighter extension.');
       }
 
-      let networkName = 'TESTNET';
-      let networkPassphrase = NETWORK_PASSPHRASE_TESTNET;
+      let networkName = 'UNKNOWN';
+      let networkPassphrase = '';
       try {
         const netDetails = await getNetworkDetails();
         if (netDetails) {
-          networkName = (netDetails as any).network || 'TESTNET';
-          networkPassphrase = (netDetails as any).networkPassphrase || NETWORK_PASSPHRASE_TESTNET;
+          networkName = (netDetails as any).network || 'UNKNOWN';
+          networkPassphrase = (netDetails as any).networkPassphrase || '';
         }
       } catch (err) {
-        console.warn('Could not fetch Freighter network details:', err);
+        console.warn('Could not verify Freighter network details:', err);
       }
 
-      const isTestnet =
-        networkPassphrase === NETWORK_PASSPHRASE_TESTNET ||
-        networkName.toUpperCase().includes('TESTNET');
+      const isTestnet = networkPassphrase === NETWORK_PASSPHRASE_TESTNET;
 
       setState({
         isInstalled: true,

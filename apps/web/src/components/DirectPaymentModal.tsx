@@ -11,6 +11,7 @@ interface DirectPaymentModalProps {
   onClose: () => void;
   sourcePublicKey: string | null;
   availableBalance: string;
+  isTestnet: boolean;
   onPaymentSuccess?: (txHash: string) => void;
 }
 
@@ -24,6 +25,7 @@ export const DirectPaymentModal: React.FC<DirectPaymentModalProps> = ({
   onClose,
   sourcePublicKey,
   availableBalance,
+  isTestnet,
   onPaymentSuccess,
 }) => {
   const [destination, setDestination] = useState('');
@@ -53,6 +55,10 @@ export const DirectPaymentModal: React.FC<DirectPaymentModalProps> = ({
     e.preventDefault();
     if (!sourcePublicKey) {
       setErrorMessage('Please connect your Freighter wallet first.');
+      return;
+    }
+    if (!isTestnet) {
+      setErrorMessage('Switch Freighter to Stellar Testnet before signing a payment.');
       return;
     }
 
@@ -168,6 +174,11 @@ export const DirectPaymentModal: React.FC<DirectPaymentModalProps> = ({
             <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
               Send native XLM on Stellar Testnet to demonstrate payment rail settlement before contract escrow deployment.
             </p>
+            {!isTestnet && (
+              <div role="alert" style={{ color: 'var(--accent-rose)', fontSize: '0.8125rem' }}>
+                Freighter must be connected to Stellar Testnet before this payment rail is enabled.
+              </div>
+            )}
 
             {/* Destination Field */}
             <div>
@@ -193,7 +204,7 @@ export const DirectPaymentModal: React.FC<DirectPaymentModalProps> = ({
                 placeholder="G..."
                 value={destination}
                 onChange={(e) => setDestination(e.target.value)}
-                disabled={stage !== 'idle' && stage !== 'failed'}
+                disabled={!isTestnet || (stage !== 'idle' && stage !== 'failed')}
                 className="input-field font-mono"
                 required
               />
@@ -229,7 +240,7 @@ export const DirectPaymentModal: React.FC<DirectPaymentModalProps> = ({
                 placeholder="e.g. 50.0"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                disabled={stage !== 'idle' && stage !== 'failed'}
+                disabled={!isTestnet || (stage !== 'idle' && stage !== 'failed')}
                 className="input-field"
                 required
               />
@@ -246,7 +257,7 @@ export const DirectPaymentModal: React.FC<DirectPaymentModalProps> = ({
                 placeholder="e.g. Milestone 1 Initial Deposit"
                 value={memo}
                 onChange={(e) => setMemo(e.target.value)}
-                disabled={stage !== 'idle' && stage !== 'failed'}
+                disabled={!isTestnet || (stage !== 'idle' && stage !== 'failed')}
                 className="input-field"
               />
             </div>

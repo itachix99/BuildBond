@@ -15,7 +15,16 @@ import {
 
 const { signTransaction } = freighterApi;
 
+function viteEnv(): Record<string, string | undefined> {
+  return (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env || {};
+}
+
+// Payment signing stays pinned to Testnet; endpoint configuration must never
+// silently change the wallet network or transaction passphrase.
+export const STELLAR_NETWORK_PASSPHRASE = NETWORK_PASSPHRASE_TESTNET;
+
 export const HORIZON_TESTNET_URL =
+  viteEnv().VITE_STELLAR_HORIZON_URL ||
   (typeof process !== 'undefined' && process.env?.VITE_STELLAR_HORIZON_URL) ||
   DEFAULT_TESTNET_HORIZON_URL;
 
@@ -49,6 +58,23 @@ export function formatXlmAmount(amountStr: string | number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 7,
   });
+}
+
+export interface ParsedStellarAmount {
+  stroops: bigint;
+  normalized: string;
+}
+
+/** Parse a positive decimal amount without floating-point rounding. */
+export function parseStellarAmount(value: string): ParsedStellarAmount {
+  const trimmed = value.trim();
+  if (!/^\d+(?:\.\d{1,7})?$/.test(trimmed)) {
+    throw new Error('Amount must be a positive decimal with at most 7 fractional digits.');
+  }
+  const [whole, fraction = ''] = trimmed.split('.');
+  const stroops = BigInt(whole) * 10_000_000n + BigInt(fraction.padEnd(7, '0') || '0');
+  if (stroops <= 0n) throw new Error('Amount must be greater than 0.');
+  return { stroops, normalized: `${whole}.${fraction.padEnd(7, '0')}` };
 }
 
 /**
@@ -127,10 +153,7 @@ export async function sendNativePayment(
     throw new Error('Invalid destination public key');
   }
 
-  const parsedAmount = parseFloat(amount);
-  if (isNaN(parsedAmount) || parsedAmount <= 0) {
-    throw new Error('Amount must be greater than 0');
-  }
+  const parsedAmount = parseStellarAmount(amount);
 
   // 1. Simulating / Loading source account
   onStatusUpdate?.('simulating');
@@ -147,12 +170,14 @@ export async function sendNativePayment(
   }
 
   // Verify source has sufficient balance including base fee
-  const nativeBalance = parseFloat(
-    sourceAccount.balances.find((b) => b.asset_type === 'native')?.balance || '0'
-  );
-  if (nativeBalance < parsedAmount + 0.00001) {
+  const nativeBalanceText = sourceAccount.balances.find((b) => b.asset_type === 'native')?.balance || '0';
+  const nativeBalance = /^0(?:\.0{1,7})?$/.test(nativeBalanceText)
+    ? { stroops: 0n, normalized: '0.0000000' }
+    : parseStellarAmount(nativeBalanceText);
+  const baseFeeStroops = 10_000n;
+  if (nativeBalance.stroops < parsedAmount.stroops + baseFeeStroops) {
     throw new Error(
-      `Insufficient XLM balance. Available: ${nativeBalance} XLM, Required: ${(parsedAmount + 0.00001).toFixed(7)} XLM (including fee).`
+      `Insufficient XLM balance. Available: ${nativeBalance.normalized} XLM, Required: ${(Number(parsedAmount.stroops + baseFeeStroops) / 10_000_000).toFixed(7)} XLM (including fee).`
     );
   }
 
@@ -164,7 +189,7 @@ export async function sendNativePayment(
     Operation.payment({
       destination: destinationPublicKey,
       asset: Asset.native(),
-      amount: parsedAmount.toFixed(7),
+      amount: parsedAmount.normalized,
     })
   ).setTimeout(TimeoutInfinite);
 

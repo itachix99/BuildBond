@@ -67,7 +67,7 @@ export const App: React.FC = () => {
             type="button"
             className="btn btn-secondary"
             onClick={() => setIsPaymentModalOpen(true)}
-            disabled={!freighter.isConnected}
+            disabled={!freighter.isConnected || !freighter.isTestnet}
             style={{ fontSize: '0.8125rem' }}
           >
             Direct XLM Pay
@@ -323,6 +323,7 @@ export const App: React.FC = () => {
         onClose={() => setIsPaymentModalOpen(false)}
         sourcePublicKey={freighter.publicKey}
         availableBalance={balance.nativeBalance}
+        isTestnet={freighter.isTestnet}
         onPaymentSuccess={() => balance.refresh()}
       />
 

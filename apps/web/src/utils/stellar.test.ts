@@ -4,6 +4,7 @@ import {
   formatXlmAmount,
   getExplorerTxUrl,
   getExplorerAccountUrl,
+  parseStellarAmount,
 } from './stellar';
 
 // Simple lightweight assertion runner for frontend unit testing
@@ -42,6 +43,19 @@ export function runStellarUtilityTests() {
   if (formatXlmAmount(0) !== '0.00') {
     throw new Error(`Test failed: Expected '0.00', got '${formatXlmAmount(0)}'`);
   }
+
+  // 3. Precision-safe XLM parsing
+  const parsed = parseStellarAmount('1.0000001');
+  if (parsed.stroops !== 10_000_001n || parsed.normalized !== '1.0000001') {
+    throw new Error('Test failed: XLM amount parsing lost stroop precision');
+  }
+  let rejectedPrecision = false;
+  try {
+    parseStellarAmount('1.00000001');
+  } catch {
+    rejectedPrecision = true;
+  }
+  if (!rejectedPrecision) throw new Error('Test failed: amounts over 7 decimal places must be rejected');
 
   // 4. Explorer URL tests
   const dummyHash = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2';

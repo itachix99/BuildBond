@@ -2,11 +2,12 @@
 /**
  * BuildBond Deployment Metadata Verification Script
  *
- * Verifies RPC reachability and the local format of operator-supplied
- * deployment metadata. It does not prove contract existence or state yet.
+ * Verifies RPC reachability, deployment metadata, contract existence, and
+ * deployed WASM hashes when valid operator-supplied IDs are configured.
  */
 
 import { rpc, StrKey } from '@stellar/stellar-sdk';
+import crypto from 'node:crypto';
 import { getNetworkConfig, buildStellarExpertContractUrl } from '@buildbond/shared';
 
 export async function verifyDeployment(networkArg?: string) {
@@ -52,12 +53,40 @@ export async function verifyDeployment(networkArg?: string) {
     failures.push('Factory WASM hash is missing or invalid.');
   }
 
-  // 3. Contract Addresses
+  // 3. Contract Addresses and live WASM verification
+  let rpcServer: rpc.Server | undefined;
+  try {
+    rpcServer = new rpc.Server(config.rpcUrl);
+  } catch {
+    // The health check above reports the actionable RPC error.
+  }
+
+  const verifyWasm = async (label: string, contractId: string, expectedHash: string) => {
+    if (!rpcServer) return;
+    try {
+      const wasm = await rpcServer.getContractWasmByContractId(contractId);
+      const actualHash = crypto.createHash('sha256').update(wasm).digest('hex');
+      if (actualHash !== expectedHash) {
+        failures.push(`${label} WASM hash mismatch: expected ${expectedHash}, got ${actualHash}.`);
+        console.error(`✗ ${label} WASM hash mismatch.`);
+      } else {
+        checks[`${label} WASM (on-chain)`] = `Verified (${actualHash.slice(0, 16)}...)`;
+        console.log(`✓ ${label} on-chain WASM hash matches the recorded build.`);
+      }
+    } catch (error: any) {
+      failures.push(`${label} contract WASM could not be read from RPC: ${error?.message || error}`);
+      console.error(`✗ ${label} on-chain WASM read failed: ${error?.message || error}`);
+    }
+  };
+
   if (config.factoryContractId && StrKey.isValidContract(config.factoryContractId)) {
     checks['Factory ID'] = config.factoryContractId;
     console.log(`✓ Factory Contract ID configured: ${config.factoryContractId}`);
     if (network === 'testnet') {
       console.log(`  Explorer: ${buildStellarExpertContractUrl(config.factoryContractId, 'testnet')}`);
+    }
+    if (config.factoryWasmHash.length === 64) {
+      await verifyWasm('Factory', config.factoryContractId, config.factoryWasmHash);
     }
   } else {
     checks['Factory ID'] = 'Missing or invalid contract ID';
@@ -69,6 +98,9 @@ export async function verifyDeployment(networkArg?: string) {
     console.log(`✓ Reference Escrow ID configured: ${config.referenceEscrowContractId}`);
     if (network === 'testnet') {
       console.log(`  Explorer: ${buildStellarExpertContractUrl(config.referenceEscrowContractId, 'testnet')}`);
+    }
+    if (config.escrowWasmHash.length === 64) {
+      await verifyWasm('Escrow', config.referenceEscrowContractId, config.escrowWasmHash);
     }
   } else {
     checks['Reference Escrow'] = 'Missing or invalid contract ID';

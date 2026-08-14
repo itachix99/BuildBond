@@ -95,13 +95,13 @@ Verify on-chain deployment status and RPC reachability:
 npm run verify:deployment
 ```
 
-The verifier fails closed unless all required values are present and valid. Its
-format checks are not a substitute for live bytecode or contract-state
-verification:
+The verifier fails closed unless all required values are present and valid. When
+valid IDs and WASM hashes are configured, it also reads each contract's WASM
+from Soroban RPC and compares the on-chain SHA-256 hash:
 - `RPC Status`: Healthy (Ledger sequence verified)
 - `Escrow WASM`: Valid SHA-256 hash (64 hex characters)
 - `Factory WASM`: Valid SHA-256 hash (64 hex characters)
-- `Factory ID`: Valid Stellar contract ID (live existence still requires RPC verification)
+- `Factory ID`: Valid Stellar contract ID with on-chain WASM verification
 
 ---
 
