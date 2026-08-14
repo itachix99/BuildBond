@@ -1,7 +1,6 @@
 #![cfg(test)]
 
-use crate::escrow_contract::{FundingPolicy, MilestoneInput, ProjectTerms};
-use crate::types::FactoryError;
+use crate::types::{FactoryError, FundingPolicy, MilestoneInput, ProjectTerms};
 use crate::{BuildBondFactoryContract, BuildBondFactoryContractClient};
 use soroban_sdk::{
     testutils::{Address as _, BytesN as _, Ledger},
@@ -76,6 +75,10 @@ fn test_factory_initialization_and_admin_update() {
     let res = client.try_update_wasm_hash(&stranger, &new_wasm_hash);
     assert_eq!(res.err(), Some(Ok(FactoryError::Unauthorized)));
 
+    let zero_hash = BytesN::from_array(&env, &[0; 32]);
+    let res = client.try_update_wasm_hash(&admin, &zero_hash);
+    assert_eq!(res.err(), Some(Ok(FactoryError::InvalidWasmHash)));
+
     // Authorized admin update succeeds
     client.update_wasm_hash(&admin, &new_wasm_hash);
     assert_eq!(client.wasm_hash(), new_wasm_hash);
@@ -119,6 +122,8 @@ fn test_factory_deploy_project_and_participant_registry() {
     let metadata_by_id = client.project_by_id(&1).unwrap();
     assert_eq!(metadata_by_id.project_id, 1);
     assert_eq!(metadata_by_id.escrow_address, deployed_escrow_addr);
+    assert_eq!(metadata_by_id.salt, salt);
+    assert_eq!(metadata_by_id.escrow_wasm_hash, escrow_wasm_hash);
     assert_eq!(metadata_by_id.owner, owner);
     assert_eq!(metadata_by_id.contractor, contractor);
     assert_eq!(metadata_by_id.inspector, inspector);
@@ -128,21 +133,45 @@ fn test_factory_deploy_project_and_participant_registry() {
 
     let metadata_by_addr = client.project_by_address(&deployed_escrow_addr).unwrap();
     assert_eq!(metadata_by_addr.project_id, 1);
+    let metadata_by_salt = client.project_by_salt(&salt).unwrap();
+    assert_eq!(metadata_by_salt.escrow_address, deployed_escrow_addr);
+
+    // A salt is a one-time deterministic deployment key.
+    let duplicate = client.try_deploy_project(&owner, &salt, &title_hash, &terms, &milestones);
+    assert_eq!(
+        duplicate.err(),
+        Some(Ok(FactoryError::ProjectAlreadyExists))
+    );
+
+    // A different salt produces an isolated second escrow and registry entry.
+    let second_salt = BytesN::random(&env);
+    let second_title_hash = BytesN::random(&env);
+    let second_escrow_addr = client.deploy_project(
+        &owner,
+        &second_salt,
+        &second_title_hash,
+        &terms,
+        &milestones,
+    );
+    assert_ne!(second_escrow_addr, deployed_escrow_addr);
+    assert_eq!(client.project_count(), 2);
+    assert_eq!(client.project_by_salt(&second_salt).unwrap().project_id, 2);
 
     // Check participant-to-project reverse queries
     let owner_projects = client.projects_by_participant(&owner);
-    assert_eq!(owner_projects.len(), 1);
+    assert_eq!(owner_projects.len(), 2);
     assert_eq!(owner_projects.get(0).unwrap(), deployed_escrow_addr);
+    assert_eq!(owner_projects.get(1).unwrap(), second_escrow_addr);
 
     let contractor_projects = client.projects_by_participant(&contractor);
-    assert_eq!(contractor_projects.len(), 1);
+    assert_eq!(contractor_projects.len(), 2);
     assert_eq!(contractor_projects.get(0).unwrap(), deployed_escrow_addr);
 
     let inspector_projects = client.projects_by_participant(&inspector);
-    assert_eq!(inspector_projects.len(), 1);
+    assert_eq!(inspector_projects.len(), 2);
 
     let arbiter_projects = client.projects_by_participant(&arbiter);
-    assert_eq!(arbiter_projects.len(), 1);
+    assert_eq!(arbiter_projects.len(), 2);
 
     let stranger_projects = client.projects_by_participant(&stranger);
     assert_eq!(stranger_projects.len(), 0);

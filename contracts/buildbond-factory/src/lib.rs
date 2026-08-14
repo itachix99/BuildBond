@@ -11,14 +11,14 @@ pub mod escrow_contract {
     soroban_sdk::contractimport!(file = "../../target/wasm32v1-none/release/buildbond_escrow.wasm");
 }
 
-use escrow_contract::{MilestoneInput, ProjectTerms};
 use events::{emit_project_deployed, emit_wasm_hash_updated};
 use storage::{
-    add_project_to_participant, get_admin, get_project, get_project_by_address, get_project_count,
-    get_projects_by_participant, get_wasm_hash, is_initialized, set_admin, set_initialized,
-    set_project, set_project_by_address, set_project_count, set_wasm_hash,
+    add_project_to_participant, get_admin, get_project, get_project_by_address,
+    get_project_by_salt, get_project_count, get_projects_by_participant, get_wasm_hash,
+    is_initialized, set_admin, set_initialized, set_project, set_project_by_address,
+    set_project_by_salt, set_project_count, set_wasm_hash,
 };
-use types::{FactoryError, ProjectMetadata};
+use types::{FactoryError, FundingPolicy, MilestoneInput, ProjectMetadata, ProjectTerms};
 
 use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Symbol, Vec};
 
@@ -29,7 +29,7 @@ pub struct BuildBondFactoryContract;
 impl BuildBondFactoryContract {
     /// Returns the factory contract version symbol
     pub fn version(_env: Env) -> Symbol {
-        symbol_short!("v0_1_0")
+        symbol_short!("v0_1_1")
     }
 
     /// Initializes the factory contract with admin address and escrow WASM bytecode hash
@@ -43,6 +43,10 @@ impl BuildBondFactoryContract {
         }
 
         admin.require_auth();
+
+        if escrow_wasm_hash.to_array() == [0; 32] {
+            return Err(FactoryError::InvalidWasmHash);
+        }
 
         set_admin(&env, &admin);
         set_wasm_hash(&env, &escrow_wasm_hash);
@@ -67,6 +71,10 @@ impl BuildBondFactoryContract {
         let current_admin = get_admin(&env)?;
         if admin != current_admin {
             return Err(FactoryError::Unauthorized);
+        }
+
+        if new_wasm_hash.to_array() == [0; 32] {
+            return Err(FactoryError::InvalidWasmHash);
         }
 
         let old_wasm_hash = get_wasm_hash(&env)?;
@@ -103,16 +111,48 @@ impl BuildBondFactoryContract {
         }
 
         let wasm_hash = get_wasm_hash(&env)?;
+        if wasm_hash.to_array() == [0; 32] {
+            return Err(FactoryError::InvalidWasmHash);
+        }
+        if get_project_by_salt(&env, &salt).is_some() {
+            return Err(FactoryError::ProjectAlreadyExists);
+        }
 
         // Deploy isolated contract instance via deployer deploy_v2
-        let deployed_address = env
-            .deployer()
-            .with_current_contract(salt)
-            .deploy_v2(wasm_hash, ());
+        let deployer = env.deployer().with_current_contract(salt.clone());
+        let predicted_address = deployer.deployed_address();
+        if get_project_by_address(&env, &predicted_address).is_some() {
+            return Err(FactoryError::ProjectAlreadyExists);
+        }
+        let deployed_address = deployer.deploy_v2(wasm_hash.clone(), ());
 
         // Initialize deployed escrow contract instance with terms and milestones
+        let escrow_terms = escrow_contract::ProjectTerms {
+            owner: terms.owner.clone(),
+            contractor: terms.contractor.clone(),
+            inspector: terms.inspector.clone(),
+            arbiter: terms.arbiter.clone(),
+            payment_token: terms.payment_token.clone(),
+            total_committed: terms.total_committed,
+            retainage_bps: terms.retainage_bps,
+            defect_period_secs: terms.defect_period_secs,
+            terms_hash: terms.terms_hash.clone(),
+            funding_policy: match terms.funding_policy {
+                FundingPolicy::FullyFunded => escrow_contract::FundingPolicy::FullyFunded,
+                FundingPolicy::Rolling => escrow_contract::FundingPolicy::Rolling,
+            },
+        };
+        let mut escrow_milestones = Vec::new(&env);
+        for milestone in milestones.iter() {
+            escrow_milestones.push_back(escrow_contract::MilestoneInput {
+                id: milestone.id,
+                amount: milestone.amount,
+                due_at: milestone.due_at,
+                inspection_deadline_secs: milestone.inspection_deadline_secs,
+            });
+        }
         let escrow_client = escrow_contract::Client::new(&env, &deployed_address);
-        escrow_client.initialize(&terms, &milestones);
+        escrow_client.initialize(&escrow_terms, &escrow_milestones);
 
         // Record in factory registry
         let current_count = get_project_count(&env);
@@ -123,6 +163,8 @@ impl BuildBondFactoryContract {
         let metadata = ProjectMetadata {
             project_id,
             escrow_address: deployed_address.clone(),
+            salt: salt.clone(),
+            escrow_wasm_hash: wasm_hash,
             title_hash,
             terms_hash: terms.terms_hash.clone(),
             owner: terms.owner.clone(),
@@ -136,6 +178,7 @@ impl BuildBondFactoryContract {
 
         set_project(&env, project_id, &metadata);
         set_project_by_address(&env, &deployed_address, &metadata);
+        set_project_by_salt(&env, &salt, &metadata);
         set_project_count(&env, project_id);
 
         // Index for all enrolled participants
@@ -177,6 +220,10 @@ impl BuildBondFactoryContract {
 
     pub fn project_by_address(env: Env, escrow_address: Address) -> Option<ProjectMetadata> {
         get_project_by_address(&env, &escrow_address)
+    }
+
+    pub fn project_by_salt(env: Env, salt: BytesN<32>) -> Option<ProjectMetadata> {
+        get_project_by_salt(&env, &salt)
     }
 
     pub fn projects_by_participant(env: Env, participant: Address) -> Vec<Address> {

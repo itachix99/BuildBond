@@ -10,6 +10,7 @@ pub enum DataKey {
     ProjectCount,
     Project(u32),
     ProjectByAddress(Address),
+    ProjectBySalt(BytesN<32>),
     ProjectsByParticipant(Address),
 }
 
@@ -74,6 +75,18 @@ pub fn set_project_by_address(env: &Env, escrow_address: &Address, metadata: &Pr
     env.storage()
         .persistent()
         .set(&DataKey::ProjectByAddress(escrow_address.clone()), metadata);
+}
+
+pub fn get_project_by_salt(env: &Env, salt: &BytesN<32>) -> Option<ProjectMetadata> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::ProjectBySalt(salt.clone()))
+}
+
+pub fn set_project_by_salt(env: &Env, salt: &BytesN<32>, metadata: &ProjectMetadata) {
+    env.storage()
+        .persistent()
+        .set(&DataKey::ProjectBySalt(salt.clone()), metadata);
 }
 
 pub fn get_projects_by_participant(env: &Env, participant: &Address) -> Vec<Address> {

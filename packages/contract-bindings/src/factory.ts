@@ -48,16 +48,18 @@ export interface ProjectMetadata {
   contractor: string;
   created_at: u64;
   escrow_address: string;
+  escrow_wasm_hash: Buffer;
   inspector: string;
   owner: string;
   payment_token: string;
   project_id: u32;
+  salt: Buffer;
   terms_hash: Buffer;
   title_hash: Buffer;
   total_committed: i128;
 }
 
-export type FactoryDataKey = {tag: "Initialized", values: void} | {tag: "Admin", values: void} | {tag: "WasmHash", values: void} | {tag: "ProjectCount", values: void} | {tag: "Project", values: readonly [u32]} | {tag: "ProjectByAddress", values: readonly [string]} | {tag: "ProjectsByParticipant", values: readonly [string]};
+export type FactoryDataKey = {tag: "Initialized", values: void} | {tag: "Admin", values: void} | {tag: "WasmHash", values: void} | {tag: "ProjectCount", values: void} | {tag: "Project", values: readonly [u32]} | {tag: "ProjectByAddress", values: readonly [string]} | {tag: "ProjectBySalt", values: readonly [Buffer]} | {tag: "ProjectsByParticipant", values: readonly [string]};
 
 export interface FactoryClient {
   admin: (options?: MethodOptions) => Promise<AssembledTransaction<Result<string>>>;
@@ -67,6 +69,7 @@ export interface FactoryClient {
   project_by_id: ({id}: {id: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Option<ProjectMetadata>>>;
   project_count: (options?: MethodOptions) => Promise<AssembledTransaction<u32>>;
   deploy_project: ({owner, salt, title_hash, terms, milestones}: {owner: string, salt: Buffer, title_hash: Buffer, terms: ProjectTerms, milestones: Array<MilestoneInput>}, options?: MethodOptions) => Promise<AssembledTransaction<Result<string>>>;
+  project_by_salt: ({salt}: {salt: Buffer}, options?: MethodOptions) => Promise<AssembledTransaction<Option<ProjectMetadata>>>;
   update_wasm_hash: ({admin, new_wasm_hash}: {admin: string, new_wasm_hash: Buffer}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>;
   project_by_address: ({escrow_address}: {escrow_address: string}, options?: MethodOptions) => Promise<AssembledTransaction<Option<ProjectMetadata>>>;
   projects_by_participant: ({participant}: {participant: string}, options?: MethodOptions) => Promise<AssembledTransaction<Array<string>>>;
@@ -93,14 +96,18 @@ export class FactoryContractClient extends ContractClient {
         "AAAAAAAAAAAAAAANcHJvamVjdF9ieV9pZAAAAAAAAAEAAAAAAAAAAmlkAAAAAAAEAAAAAQAAA+gAAAfQAAAAD1Byb2plY3RNZXRhZGF0YQA=",
         "AAAAAAAAAAAAAAANcHJvamVjdF9jb3VudAAAAAAAAAAAAAABAAAABA==",
         "AAAAAAAAAGVEZXBsb3lzIGFuIGlzb2xhdGVkLCBkZWRpY2F0ZWQgZXNjcm93IGNvbnRyYWN0IGluc3RhbmNlIGZvciBhIGNvbnN0cnVjdGlvbiBwcm9qZWN0IGFuZCBpbml0aWFsaXplcyBpdAAAAAAAAA5kZXBsb3lfcHJvamVjdAAAAAAABQAAAAAAAAAFb3duZXIAAAAAAAATAAAAAAAAAARzYWx0AAAD7gAAACAAAAAAAAAACnRpdGxlX2hhc2gAAAAAA+4AAAAgAAAAAAAAAAV0ZXJtcwAAAAAAB9AAAAAMUHJvamVjdFRlcm1zAAAAAAAAAAptaWxlc3RvbmVzAAAAAAPqAAAH0AAAAA5NaWxlc3RvbmVJbnB1dAAAAAAAAQAAA+kAAAATAAAH0AAAAAxGYWN0b3J5RXJyb3I=",
+        "AAAAAAAAAAAAAAAPcHJvamVjdF9ieV9zYWx0AAAAAAEAAAAAAAAABHNhbHQAAAPuAAAAIAAAAAEAAAPoAAAH0AAAAA9Qcm9qZWN0TWV0YWRhdGEA",
         "AAAAAAAAAGBBbGxvd3MgdGhlIGZhY3RvcnkgYWRtaW4gdG8gdXBkYXRlIHRoZSB0ZW1wbGF0ZSBlc2Nyb3cgV0FTTSBieXRlY29kZSBoYXNoIGZvciBmdXR1cmUgZGVwbG95bWVudHMAAAAQdXBkYXRlX3dhc21faGFzaAAAAAIAAAAAAAAABWFkbWluAAAAAAAAEwAAAAAAAAANbmV3X3dhc21faGFzaAAAAAAAA+4AAAAgAAAAAQAAA+kAAAACAAAH0AAAAAxGYWN0b3J5RXJyb3I=",
         "AAAAAAAAAAAAAAAScHJvamVjdF9ieV9hZGRyZXNzAAAAAAABAAAAAAAAAA5lc2Nyb3dfYWRkcmVzcwAAAAAAEwAAAAEAAAPoAAAH0AAAAA9Qcm9qZWN0TWV0YWRhdGEA",
         "AAAAAAAAAAAAAAAXcHJvamVjdHNfYnlfcGFydGljaXBhbnQAAAAAAQAAAAAAAAALcGFydGljaXBhbnQAAAAAEwAAAAEAAAPqAAAAEw==",
         "AAAABAAAAAAAAAAAAAAADEZhY3RvcnlFcnJvcgAAAAgAAAAAAAAADk5vdEluaXRpYWxpemVkAAAAAAABAAAAAAAAABJBbHJlYWR5SW5pdGlhbGl6ZWQAAAAAAAIAAAAAAAAADFVuYXV0aG9yaXplZAAAAAMAAAAAAAAAD0ludmFsaWRXYXNtSGFzaAAAAAAEAAAAAAAAABRQcm9qZWN0QWxyZWFkeUV4aXN0cwAAAAUAAAAAAAAAD1Byb2plY3ROb3RGb3VuZAAAAAAGAAAAAAAAAA1JbnZhbGlkQW1vdW50AAAAAAAABwAAAAAAAAASQXJpdGhtZXRpY092ZXJmbG93AAAAAAAI",
-        "AAAAAQAAAAAAAAAAAAAAD1Byb2plY3RNZXRhZGF0YQAAAAALAAAAAAAAAAdhcmJpdGVyAAAAABMAAAAAAAAACmNvbnRyYWN0b3IAAAAAABMAAAAAAAAACmNyZWF0ZWRfYXQAAAAAAAYAAAAAAAAADmVzY3Jvd19hZGRyZXNzAAAAAAATAAAAAAAAAAlpbnNwZWN0b3IAAAAAAAATAAAAAAAAAAVvd25lcgAAAAAAABMAAAAAAAAADXBheW1lbnRfdG9rZW4AAAAAAAATAAAAAAAAAApwcm9qZWN0X2lkAAAAAAAEAAAAAAAAAAp0ZXJtc19oYXNoAAAAAAPuAAAAIAAAAAAAAAAKdGl0bGVfaGFzaAAAAAAD7gAAACAAAAAAAAAAD3RvdGFsX2NvbW1pdHRlZAAAAAAL",
+        "AAAAAQAAAAAAAAAAAAAADFByb2plY3RUZXJtcwAAAAoAAAAAAAAAB2FyYml0ZXIAAAAAEwAAAAAAAAAKY29udHJhY3RvcgAAAAAAEwAAAAAAAAASZGVmZWN0X3BlcmlvZF9zZWNzAAAAAAAGAAAAAAAAAA5mdW5kaW5nX3BvbGljeQAAAAAH0AAAAA1GdW5kaW5nUG9saWN5AAAAAAAAAAAAAAlpbnNwZWN0b3IAAAAAAAATAAAAAAAAAAVvd25lcgAAAAAAABMAAAAAAAAADXBheW1lbnRfdG9rZW4AAAAAAAATAAAAAAAAAA1yZXRhaW5hZ2VfYnBzAAAAAAAABAAAAAAAAAAKdGVybXNfaGFzaAAAAAAD7gAAACAAAAAAAAAAD3RvdGFsX2NvbW1pdHRlZAAAAAAL",
+        "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",
-        "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"
+        "AAAAAgAAAAAAAAAAAAAAB0RhdGFLZXkAAAAACAAAAAAAAAAAAAAAC0luaXRpYWxpemVkAAAAAAAAAAAAAAAABUFkbWluAAAAAAAAAAAAAAAAAAAIV2FzbUhhc2gAAAAAAAAAAAAAAAxQcm9qZWN0Q291bnQAAAABAAAAAAAAAAdQcm9qZWN0AAAAAAEAAAAEAAAAAQAAAAAAAAAQUHJvamVjdEJ5QWRkcmVzcwAAAAEAAAATAAAAAQAAAAAAAAANUHJvamVjdEJ5U2FsdAAAAAAAAAEAAAPuAAAAIAAAAAEAAAAAAAAAFVByb2plY3RzQnlQYXJ0aWNpcGFudAAAAAAAAAEAAAAT"
       ]),
       options
     );
@@ -113,6 +120,7 @@ export class FactoryContractClient extends ContractClient {
     project_by_id: this.txFromJSON<Option<ProjectMetadata>>,
     project_count: this.txFromJSON<u32>,
     deploy_project: this.txFromJSON<Result<string>>,
+    project_by_salt: this.txFromJSON<Option<ProjectMetadata>>,
     update_wasm_hash: this.txFromJSON<Result<void>>,
     project_by_address: this.txFromJSON<Option<ProjectMetadata>>,
     projects_by_participant: this.txFromJSON<Array<string>>,
