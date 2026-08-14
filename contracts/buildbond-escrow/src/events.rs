@@ -271,3 +271,62 @@ pub fn emit_retainage_claimed(
     }
     .publish(env);
 }
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DisputeOpenedEvent {
+    pub milestone_id: u32,
+    pub initiator: Address,
+    pub amount_disputed: i128,
+    pub reason_hash: BytesN<32>,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DisputeResolvedEvent {
+    pub milestone_id: u32,
+    pub arbiter: Address,
+    pub contractor_award: i128,
+    pub owner_refund: i128,
+    pub report_hash: BytesN<32>,
+    pub timestamp: u64,
+}
+
+pub fn emit_dispute_opened(
+    env: &Env,
+    milestone_id: u32,
+    initiator: &Address,
+    amount_disputed: i128,
+    reason_hash: &BytesN<32>,
+    timestamp: u64,
+) {
+    DisputeOpenedEvent {
+        milestone_id,
+        initiator: initiator.clone(),
+        amount_disputed,
+        reason_hash: reason_hash.clone(),
+        timestamp,
+    }
+    .publish(env);
+}
+
+pub fn emit_dispute_resolved(
+    env: &Env,
+    milestone_id: u32,
+    arbiter: &Address,
+    contractor_award: i128,
+    owner_refund: i128,
+    report_hash: &BytesN<32>,
+    timestamp: u64,
+) {
+    DisputeResolvedEvent {
+        milestone_id,
+        arbiter: arbiter.clone(),
+        contractor_award,
+        owner_refund,
+        report_hash: report_hash.clone(),
+        timestamp,
+    }
+    .publish(env);
+}

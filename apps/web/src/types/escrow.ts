@@ -103,6 +103,24 @@ export interface UIAccounting {
   withdrawn: number;
 }
 
+export interface UIDispute {
+  milestoneId: number;
+  initiator: string;
+  initiatorRole: RoleType;
+  reasonHash: string;
+  reasonText: string;
+  openedAt: number;
+  amountDisputed: number;
+  status: 'Open' | 'Resolved';
+  previousMilestoneStatus: MilestoneStage;
+  frozenRemainingSecs?: number;
+  contractorAward: number;
+  ownerRefund: number;
+  reportHash?: string;
+  reportNotes?: string;
+  resolvedAt?: number;
+}
+
 export interface UIProject {
   id: string;
   title: string;
@@ -124,6 +142,7 @@ export interface UIProject {
   milestones: UIMilestone[];
   acceptances: Record<RoleType, UIAcceptance>;
   accounting: UIAccounting;
+  disputes: Record<number, UIDispute>;
 }
 
 export interface TransactionLog {
@@ -138,3 +157,4 @@ export interface TransactionLog {
   details: string;
   stellarExpertUrl: string;
 }
+

@@ -206,3 +206,27 @@ pub struct ClaimableView {
     pub retainage_claimable: i128,
     pub owner_refundable: i128,
 }
+
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum DisputeStatus {
+    Open = 1,
+    Resolved = 2,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DisputeRecord {
+    pub milestone_id: u32,
+    pub initiator: Address,
+    pub reason_hash: BytesN<32>,
+    pub opened_at: u64,
+    pub amount_disputed: i128,
+    pub status: DisputeStatus,
+    pub previous_milestone_status: MilestoneStatus,
+    pub frozen_remaining_secs: Option<u64>,
+    pub report_hash: Option<BytesN<32>>,
+    pub contractor_award: i128,
+    pub owner_refund: i128,
+    pub resolved_at: Option<u64>,
+}

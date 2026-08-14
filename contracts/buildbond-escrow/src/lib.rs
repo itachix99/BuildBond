@@ -8,20 +8,21 @@ pub mod types;
 pub mod test;
 
 use events::{
-    emit_inspection_recorded, emit_milestone_approved, emit_milestone_funded,
-    emit_milestone_submitted, emit_payment_withdrawn, emit_project_activated, emit_project_created,
-    emit_project_funded, emit_refund_withdrawn, emit_retainage_claimed, emit_role_accepted,
-    emit_role_declined,
+    emit_dispute_opened, emit_dispute_resolved, emit_inspection_recorded, emit_milestone_approved,
+    emit_milestone_funded, emit_milestone_submitted, emit_payment_withdrawn,
+    emit_project_activated, emit_project_created, emit_project_funded, emit_refund_withdrawn,
+    emit_retainage_claimed, emit_role_accepted, emit_role_declined,
 };
 use storage::{
-    get_accounting, get_milestone, get_milestone_count, get_role_acceptance, get_role_address,
-    get_status, get_terms, get_unallocated_funds, is_initialized, set_accounting, set_initialized,
-    set_milestone, set_milestone_count, set_role_acceptance, set_status, set_terms,
+    get_accounting, get_dispute, get_milestone, get_milestone_count, get_role_acceptance,
+    get_role_address, get_status, get_terms, get_unallocated_funds, is_initialized, set_accounting,
+    set_dispute, set_initialized, set_milestone, set_milestone_count, set_role_acceptance,
+    set_status, set_terms,
 };
 use types::{
-    AcceptanceView, Accounting, BuildBondError, ClaimableView, CoverageView, FundingPolicy,
-    InspectionDecision, Milestone, MilestoneInput, MilestoneStatus, ProjectStatus, ProjectTerms,
-    ProjectView, Role,
+    AcceptanceView, Accounting, BuildBondError, ClaimableView, CoverageView, DisputeRecord,
+    DisputeStatus, FundingPolicy, InspectionDecision, Milestone, MilestoneInput, MilestoneStatus,
+    ProjectStatus, ProjectTerms, ProjectView, Role,
 };
 
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
@@ -696,6 +697,203 @@ impl BuildBondEscrowContract {
         Ok(())
     }
 
+    /// Opens a formal dispute on a milestone, freezing funds and defect timers
+    pub fn open_dispute(
+        env: Env,
+        initiator: Address,
+        milestone_id: u32,
+        reason_hash: BytesN<32>,
+    ) -> Result<(), BuildBondError> {
+        if !is_initialized(&env) {
+            return Err(BuildBondError::NotInitialized);
+        }
+
+        let status = get_status(&env)?;
+        if status == ProjectStatus::Completed || status == ProjectStatus::Terminated {
+            return Err(BuildBondError::InvalidState);
+        }
+
+        initiator.require_auth();
+
+        let terms = get_terms(&env)?;
+        if initiator != terms.owner && initiator != terms.contractor {
+            return Err(BuildBondError::Unauthorized);
+        }
+
+        let mut m = get_milestone(&env, milestone_id)?;
+        if m.status != MilestoneStatus::Submitted
+            && m.status != MilestoneStatus::Rejected
+            && m.status != MilestoneStatus::ReworkRequired
+            && m.status != MilestoneStatus::InDefectPeriod
+            && m.status != MilestoneStatus::Funded
+        {
+            return Err(BuildBondError::InvalidState);
+        }
+
+        if let Some(existing_dispute) = get_dispute(&env, milestone_id) {
+            if existing_dispute.status == DisputeStatus::Open {
+                return Err(BuildBondError::ActiveDispute);
+            }
+        }
+
+        let mut accounting = get_accounting(&env)?;
+        let prev_status = m.status;
+        let amount_disputed: i128;
+
+        if m.status == MilestoneStatus::InDefectPeriod {
+            amount_disputed = m
+                .retainage_amount
+                .checked_sub(m.retained_released)
+                .ok_or(BuildBondError::ArithmeticOverflow)?;
+
+            if amount_disputed <= 0 {
+                return Err(BuildBondError::NothingToWithdraw);
+            }
+
+            let deadline = m.defect_deadline_at.unwrap_or(0);
+            let now = env.ledger().timestamp();
+            let remaining_secs = deadline.saturating_sub(now);
+            m.frozen_remaining_secs = Some(remaining_secs);
+
+            accounting.retainage_locked = accounting
+                .retainage_locked
+                .checked_sub(amount_disputed)
+                .ok_or(BuildBondError::ArithmeticOverflow)?;
+            accounting.disputed = accounting
+                .disputed
+                .checked_add(amount_disputed)
+                .ok_or(BuildBondError::ArithmeticOverflow)?;
+        } else {
+            amount_disputed = m.amount;
+            accounting.allocated = accounting
+                .allocated
+                .checked_sub(amount_disputed)
+                .ok_or(BuildBondError::ArithmeticOverflow)?;
+            accounting.disputed = accounting
+                .disputed
+                .checked_add(amount_disputed)
+                .ok_or(BuildBondError::ArithmeticOverflow)?;
+        }
+
+        m.status = MilestoneStatus::Disputed;
+
+        let dispute_record = DisputeRecord {
+            milestone_id,
+            initiator: initiator.clone(),
+            reason_hash: reason_hash.clone(),
+            opened_at: env.ledger().timestamp(),
+            amount_disputed,
+            status: DisputeStatus::Open,
+            previous_milestone_status: prev_status,
+            frozen_remaining_secs: m.frozen_remaining_secs,
+            report_hash: None,
+            contractor_award: 0,
+            owner_refund: 0,
+            resolved_at: None,
+        };
+
+        set_milestone(&env, milestone_id, &m);
+        set_accounting(&env, &accounting);
+        set_dispute(&env, milestone_id, &dispute_record);
+
+        emit_dispute_opened(
+            &env,
+            milestone_id,
+            &initiator,
+            amount_disputed,
+            &reason_hash,
+            env.ledger().timestamp(),
+        );
+
+        Ok(())
+    }
+
+    /// Resolves a formal dispute with binding arbiter award allocation
+    pub fn resolve_dispute(
+        env: Env,
+        arbiter: Address,
+        milestone_id: u32,
+        contractor_award: i128,
+        owner_refund: i128,
+        report_hash: BytesN<32>,
+    ) -> Result<(), BuildBondError> {
+        if !is_initialized(&env) {
+            return Err(BuildBondError::NotInitialized);
+        }
+
+        arbiter.require_auth();
+
+        let terms = get_terms(&env)?;
+        if arbiter != terms.arbiter {
+            return Err(BuildBondError::Unauthorized);
+        }
+
+        let mut m = get_milestone(&env, milestone_id)?;
+        if m.status != MilestoneStatus::Disputed {
+            return Err(BuildBondError::InvalidState);
+        }
+
+        let mut dispute = get_dispute(&env, milestone_id).ok_or(BuildBondError::DisputeNotFound)?;
+        if dispute.status != DisputeStatus::Open {
+            return Err(BuildBondError::DisputeAlreadyResolved);
+        }
+
+        if contractor_award < 0 || owner_refund < 0 {
+            return Err(BuildBondError::InvalidAmount);
+        }
+
+        let total_award = contractor_award
+            .checked_add(owner_refund)
+            .ok_or(BuildBondError::ArithmeticOverflow)?;
+        if total_award != dispute.amount_disputed {
+            return Err(BuildBondError::InvalidAwardAllocation);
+        }
+
+        let mut accounting = get_accounting(&env)?;
+        accounting.disputed = accounting
+            .disputed
+            .checked_sub(dispute.amount_disputed)
+            .ok_or(BuildBondError::ArithmeticOverflow)?;
+        accounting.contractor_payable = accounting
+            .contractor_payable
+            .checked_add(contractor_award)
+            .ok_or(BuildBondError::ArithmeticOverflow)?;
+        accounting.owner_refundable = accounting
+            .owner_refundable
+            .checked_add(owner_refund)
+            .ok_or(BuildBondError::ArithmeticOverflow)?;
+
+        if dispute.previous_milestone_status == MilestoneStatus::InDefectPeriod {
+            m.retained_released = m.retainage_amount;
+            m.status = MilestoneStatus::Settled;
+        } else {
+            m.paid_amount = contractor_award;
+            m.status = MilestoneStatus::Settled;
+        }
+
+        dispute.status = DisputeStatus::Resolved;
+        dispute.report_hash = Some(report_hash.clone());
+        dispute.contractor_award = contractor_award;
+        dispute.owner_refund = owner_refund;
+        dispute.resolved_at = Some(env.ledger().timestamp());
+
+        set_milestone(&env, milestone_id, &m);
+        set_accounting(&env, &accounting);
+        set_dispute(&env, milestone_id, &dispute);
+
+        emit_dispute_resolved(
+            &env,
+            milestone_id,
+            &arbiter,
+            contractor_award,
+            owner_refund,
+            &report_hash,
+            env.ledger().timestamp(),
+        );
+
+        Ok(())
+    }
+
     // --- Read Methods ---
 
     pub fn project(env: Env) -> Result<ProjectView, BuildBondError> {
@@ -722,6 +920,10 @@ impl BuildBondEscrowContract {
 
     pub fn role_acceptance(env: Env, role: Role) -> Option<AcceptanceView> {
         get_role_acceptance(&env, role)
+    }
+
+    pub fn dispute(env: Env, milestone_id: u32) -> Option<DisputeRecord> {
+        get_dispute(&env, milestone_id)
     }
 
     pub fn coverage(env: Env) -> Result<CoverageView, BuildBondError> {

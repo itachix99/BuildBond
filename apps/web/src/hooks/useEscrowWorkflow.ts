@@ -93,6 +93,7 @@ export const INITIAL_PROJECT: UIProject = {
     ownerRefundable: 0,
     withdrawn: 0,
   },
+  disputes: {},
 };
 
 export function useEscrowWorkflow(freighterAddress: string | null) {
@@ -425,6 +426,145 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
     }
   }, [project.milestones, project.paymentTokenSymbol, addLog]);
 
+  // 8. Open Dispute Action
+  const openDispute = useCallback(async (milestoneId: number, reason: string) => {
+    setIsBusy(true);
+    try {
+      const reasonHash = await computeReportHash(milestoneId, 'Reject', reason);
+      addLog(`Dispute Initiated (#${milestoneId})`, 'open_dispute', `${activeRole} opening formal dispute on Milestone #${milestoneId}. Reason digest: ${reasonHash.slice(0, 16)}...`);
+      await new Promise(r => setTimeout(r, 800));
+
+      setProject(prev => {
+        const target = prev.milestones.find(m => m.id === milestoneId);
+        if (!target) return prev;
+
+        const prevStatus = target.status;
+        let amountDisputed = target.amount;
+        let nextAllocated = prev.accounting.allocated;
+        let nextRetainageLocked = prev.accounting.retainageLocked;
+        let frozenRemainingSecs: number | undefined = undefined;
+
+        if (prevStatus === 'InDefectPeriod') {
+          amountDisputed = target.retainageAmount - target.retainedReleased;
+          const deadline = target.defectDeadlineAt || 0;
+          frozenRemainingSecs = Math.max(0, deadline - simulatedLedgerTimestamp);
+          nextRetainageLocked -= amountDisputed;
+        } else {
+          nextAllocated -= amountDisputed;
+        }
+
+        const nextAccounting = {
+          ...prev.accounting,
+          allocated: nextAllocated,
+          retainageLocked: nextRetainageLocked,
+          disputed: prev.accounting.disputed + amountDisputed,
+        };
+
+        const nextMilestones = prev.milestones.map(m => {
+          if (m.id === milestoneId) {
+            return {
+              ...m,
+              status: 'Disputed' as const,
+            };
+          }
+          return m;
+        });
+
+        const newDispute = {
+          milestoneId,
+          initiator: activeAddress,
+          initiatorRole: activeRole,
+          reasonHash,
+          reasonText: reason,
+          openedAt: simulatedLedgerTimestamp,
+          amountDisputed,
+          status: 'Open' as const,
+          previousMilestoneStatus: prevStatus,
+          frozenRemainingSecs,
+          contractorAward: 0,
+          ownerRefund: 0,
+        };
+
+        return {
+          ...prev,
+          milestones: nextMilestones,
+          accounting: nextAccounting,
+          disputes: {
+            ...prev.disputes,
+            [milestoneId]: newDispute,
+          },
+        };
+      });
+
+      addLog(`Dispute Recorded (#${milestoneId})`, 'open_dispute', `Funds frozen in escrow custody. Defect clock paused. Neutral arbiter notified.`);
+    } finally {
+      setIsBusy(false);
+    }
+  }, [activeRole, activeAddress, simulatedLedgerTimestamp, addLog]);
+
+  // 9. Resolve Dispute Action (Arbiter)
+  const resolveDispute = useCallback(async (
+    milestoneId: number,
+    contractorAward: number,
+    ownerRefund: number,
+    reportNotes: string
+  ) => {
+    setIsBusy(true);
+    try {
+      const reportHash = await computeReportHash(milestoneId, 'Approve', reportNotes);
+      addLog(`Arbitration Award (#${milestoneId})`, 'resolve_dispute', `Arbiter issuing binding award: Contractor $${contractorAward.toLocaleString()} / Owner Refund $${ownerRefund.toLocaleString()}.`);
+      await new Promise(r => setTimeout(r, 900));
+
+      setProject(prev => {
+        const targetDispute = prev.disputes[milestoneId];
+        if (!targetDispute) return prev;
+
+        const nextAccounting = {
+          ...prev.accounting,
+          disputed: prev.accounting.disputed - targetDispute.amountDisputed,
+          contractorPayable: prev.accounting.contractorPayable + contractorAward,
+          ownerRefundable: prev.accounting.ownerRefundable + ownerRefund,
+        };
+
+        const nextMilestones = prev.milestones.map(m => {
+          if (m.id === milestoneId) {
+            return {
+              ...m,
+              status: 'Settled' as const,
+              retainedReleased: targetDispute.previousMilestoneStatus === 'InDefectPeriod' ? m.retainageAmount : m.retainedReleased,
+              paidAmount: contractorAward,
+            };
+          }
+          return m;
+        });
+
+        const nextDispute = {
+          ...targetDispute,
+          status: 'Resolved' as const,
+          contractorAward,
+          ownerRefund,
+          reportHash,
+          reportNotes,
+          resolvedAt: simulatedLedgerTimestamp,
+        };
+
+        return {
+          ...prev,
+          milestones: nextMilestones,
+          accounting: nextAccounting,
+          disputes: {
+            ...prev.disputes,
+            [milestoneId]: nextDispute,
+          },
+        };
+      });
+
+      addLog(`Arbitration Resolved (#${milestoneId})`, 'resolve_dispute', `Binding award executed on-chain. Funds reallocated to contractor payable & owner refundable buckets.`);
+    } finally {
+      setIsBusy(false);
+    }
+  }, [simulatedLedgerTimestamp, addLog]);
+
   // Fast forward simulated ledger time (e.g. +90 days)
   const fastForwardDays = useCallback((days: number) => {
     setSimulatedTimeOffsetSecs(prev => prev + days * 86400);
@@ -459,6 +599,9 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
     inspectMilestone,
     withdrawEarned,
     claimRetainage,
+    openDispute,
+    resolveDispute,
     resetDemo,
   };
 }
+

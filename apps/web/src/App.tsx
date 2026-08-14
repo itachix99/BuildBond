@@ -11,10 +11,13 @@ import { MilestoneList } from './components/MilestoneList';
 import { MilestoneEvidenceModal } from './components/MilestoneEvidenceModal';
 import { InspectionModal } from './components/InspectionModal';
 import { WithdrawalHub } from './components/WithdrawalHub';
+import { DisputeCenter } from './components/DisputeCenter';
+import { OpenDisputeModal } from './components/OpenDisputeModal';
+import { ArbitrationModal } from './components/ArbitrationModal';
 import { TransactionAuditDrawer } from './components/TransactionAuditDrawer';
-import { UIMilestone } from './types/escrow';
+import { UIDispute, UIMilestone } from './types/escrow';
 
-type TabType = 'milestones' | 'acceptance' | 'funding' | 'payouts';
+type TabType = 'milestones' | 'acceptance' | 'funding' | 'payouts' | 'disputes';
 
 export const App: React.FC = () => {
   const freighter = useFreighter();
@@ -24,8 +27,11 @@ export const App: React.FC = () => {
 
   const [activeEvidenceMilestone, setActiveEvidenceMilestone] = useState<UIMilestone | null>(null);
   const [activeInspectionMilestone, setActiveInspectionMilestone] = useState<UIMilestone | null>(null);
+  const [activeDisputeMilestone, setActiveDisputeMilestone] = useState<UIMilestone | null>(null);
+  const [activeArbitrationDispute, setActiveArbitrationDispute] = useState<UIDispute | null>(null);
 
   const escrow = useEscrowWorkflow(freighter.publicKey);
+  const openDisputesCount = Object.values(escrow.project.disputes).filter(d => d.status === 'Open').length;
 
   return (
     <div className="container">
@@ -92,6 +98,9 @@ export const App: React.FC = () => {
               Status: {escrow.project.status}
             </span>
             <span className="badge badge-amber">{escrow.project.paymentTokenSymbol} Settlement</span>
+            {openDisputesCount > 0 && (
+              <span className="status-pill danger">⚠️ {openDisputesCount} Active Dispute</span>
+            )}
           </div>
           <h2 className="project-title">{escrow.project.title}</h2>
           <div className="project-meta">
@@ -132,6 +141,13 @@ export const App: React.FC = () => {
             onClick={() => setActiveTab('payouts')}
           >
             💰 Payouts & Retainage ({escrow.project.accounting.contractorPayable.toLocaleString()} {escrow.project.paymentTokenSymbol})
+          </button>
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'disputes' ? 'active' : ''}`}
+            onClick={() => setActiveTab('disputes')}
+          >
+            ⚖️ Arbitration {openDisputesCount > 0 ? `(${openDisputesCount})` : ''}
           </button>
         </div>
       </section>
@@ -180,6 +196,16 @@ export const App: React.FC = () => {
             isBusy={escrow.isBusy}
           />
         )}
+
+        {activeTab === 'disputes' && (
+          <DisputeCenter
+            project={escrow.project}
+            activeRole={escrow.activeRole}
+            onOpenDisputeModal={setActiveDisputeMilestone}
+            onOpenArbitrationModal={setActiveArbitrationDispute}
+            isBusy={escrow.isBusy}
+          />
+        )}
       </main>
 
       {/* Contractor Evidence Submission Modal */}
@@ -199,6 +225,28 @@ export const App: React.FC = () => {
           milestone={activeInspectionMilestone}
           onClose={() => setActiveInspectionMilestone(null)}
           onInspect={escrow.inspectMilestone}
+          isBusy={escrow.isBusy}
+        />
+      )}
+
+      {/* Dispute Opening Modal (Owner / Contractor) */}
+      {activeDisputeMilestone && (
+        <OpenDisputeModal
+          project={escrow.project}
+          milestone={activeDisputeMilestone}
+          onClose={() => setActiveDisputeMilestone(null)}
+          onOpenDispute={escrow.openDispute}
+          isBusy={escrow.isBusy}
+        />
+      )}
+
+      {/* Neutral Arbitration Award Ruling Modal (Arbiter) */}
+      {activeArbitrationDispute && (
+        <ArbitrationModal
+          project={escrow.project}
+          dispute={activeArbitrationDispute}
+          onClose={() => setActiveArbitrationDispute(null)}
+          onResolveDispute={escrow.resolveDispute}
           isBusy={escrow.isBusy}
         />
       )}

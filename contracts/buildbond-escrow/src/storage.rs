@@ -13,6 +13,7 @@ pub enum DataKey {
     MilestoneCount,
     Milestone(u32),
     RoleAcceptance(Role),
+    Dispute(u32),
 }
 
 pub fn is_initialized(env: &Env) -> bool {
@@ -92,6 +93,18 @@ pub fn set_role_acceptance(env: &Env, role: Role, acceptance: &AcceptanceView) {
     env.storage()
         .instance()
         .set(&DataKey::RoleAcceptance(role), acceptance);
+}
+
+pub fn get_dispute(env: &Env, milestone_id: u32) -> Option<crate::types::DisputeRecord> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::Dispute(milestone_id))
+}
+
+pub fn set_dispute(env: &Env, milestone_id: u32, dispute: &crate::types::DisputeRecord) {
+    env.storage()
+        .persistent()
+        .set(&DataKey::Dispute(milestone_id), dispute);
 }
 
 pub fn get_role_address(terms: &ProjectTerms, role: Role) -> Address {

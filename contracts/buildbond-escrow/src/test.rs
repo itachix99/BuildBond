@@ -665,3 +665,140 @@ fn test_contractor_earned_withdrawal_and_retainage_claim_end_to_end() {
     let res = client.try_claim_retainage(&contractor, &1);
     assert_eq!(res.err(), Some(Ok(BuildBondError::InvalidState)));
 }
+
+// ==========================================
+// Phase 7 Dispute & Arbitration Tests
+// ==========================================
+
+#[test]
+fn test_open_dispute_and_arbitration_resolution() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_000);
+
+    let contract_id = env.register(BuildBondEscrowContract, ());
+    let client = BuildBondEscrowContractClient::new(&env, &contract_id);
+
+    let (terms, owner, contractor, inspector, arbiter, _, token_client) =
+        create_test_terms(&env, FundingPolicy::FullyFunded);
+    let milestones = create_test_milestones(&env);
+
+    client.initialize(&terms, &milestones);
+    token_client.mint(&owner, &60_000);
+    client.deposit(&owner, &60_000);
+
+    client.accept_role(&contractor, &Role::Contractor, &terms.terms_hash);
+    client.accept_role(&inspector, &Role::Inspector, &terms.terms_hash);
+    client.accept_role(&arbiter, &Role::Arbiter, &terms.terms_hash);
+    client.activate(&owner);
+
+    // Contractor submits Milestone 1 ($25,000)
+    let evidence = BytesN::random(&env);
+    client.submit_milestone(&contractor, &1, &evidence);
+
+    // 1. Unauthorized party cannot open dispute
+    let stranger = Address::generate(&env);
+    let reason_1 = BytesN::random(&env);
+    let res = client.try_open_dispute(&stranger, &1, &reason_1);
+    assert_eq!(res.err(), Some(Ok(BuildBondError::Unauthorized)));
+
+    // 2. Owner opens dispute on Milestone 1
+    client.open_dispute(&owner, &1, &reason_1);
+
+    let m1 = client.milestone(&1);
+    assert_eq!(m1.status, MilestoneStatus::Disputed);
+
+    let acct = client.accounting();
+    assert_eq!(acct.allocated, 35_000); // M2 remains allocated
+    assert_eq!(acct.disputed, 25_000); // M1 moved to disputed
+
+    let dispute_rec = client.dispute(&1).unwrap();
+    assert_eq!(dispute_rec.status, DisputeStatus::Open);
+    assert_eq!(dispute_rec.initiator, owner);
+    assert_eq!(dispute_rec.amount_disputed, 25_000);
+
+    // 3. Non-arbiter cannot resolve dispute
+    let report_hash = BytesN::random(&env);
+    let res = client.try_resolve_dispute(&owner, &1, &17_500, &7_500, &report_hash);
+    assert_eq!(res.err(), Some(Ok(BuildBondError::Unauthorized)));
+
+    // 4. Award sum mismatch fails ($17,500 + $8,000 != $25,000)
+    let res = client.try_resolve_dispute(&arbiter, &1, &17_500, &8_000, &report_hash);
+    assert_eq!(res.err(), Some(Ok(BuildBondError::InvalidAwardAllocation)));
+
+    // 5. Arbiter resolves dispute: 70% ($17,500) to contractor, 30% ($7,500) refund to owner
+    client.resolve_dispute(&arbiter, &1, &17_500, &7_500, &report_hash);
+
+    let acct_after = client.accounting();
+    assert_eq!(acct_after.disputed, 0);
+    assert_eq!(acct_after.contractor_payable, 17_500);
+    assert_eq!(acct_after.owner_refundable, 7_500);
+
+    let m1_settled = client.milestone(&1);
+    assert_eq!(m1_settled.status, MilestoneStatus::Settled);
+    assert_eq!(m1_settled.paid_amount, 17_500);
+
+    let dispute_resolved = client.dispute(&1).unwrap();
+    assert_eq!(dispute_resolved.status, DisputeStatus::Resolved);
+    assert_eq!(dispute_resolved.contractor_award, 17_500);
+    assert_eq!(dispute_resolved.owner_refund, 7_500);
+
+    // 6. Invariant check
+    assert_eq!(
+        acct_after.allocated + acct_after.contractor_payable + acct_after.owner_refundable,
+        acct_after.deposited
+    );
+}
+
+#[test]
+fn test_dispute_during_defect_period_freezes_timer() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_000);
+
+    let contract_id = env.register(BuildBondEscrowContract, ());
+    let client = BuildBondEscrowContractClient::new(&env, &contract_id);
+
+    let (terms, owner, contractor, inspector, arbiter, _, token_client) =
+        create_test_terms(&env, FundingPolicy::FullyFunded);
+    let milestones = create_test_milestones(&env);
+
+    client.initialize(&terms, &milestones);
+    token_client.mint(&owner, &60_000);
+    client.deposit(&owner, &60_000);
+
+    client.accept_role(&contractor, &Role::Contractor, &terms.terms_hash);
+    client.accept_role(&inspector, &Role::Inspector, &terms.terms_hash);
+    client.accept_role(&arbiter, &Role::Arbiter, &terms.terms_hash);
+    client.activate(&owner);
+
+    // Milestone 1 approved at t=1,000 (defect deadline = 1,000 + 90*86400 = 7,777,000)
+    let evidence = BytesN::random(&env);
+    client.submit_milestone(&contractor, &1, &evidence);
+    let report = BytesN::random(&env);
+    client.inspect_milestone(&inspector, &1, &InspectionDecision::Approve, &report);
+
+    // At t=2,000, Owner opens dispute on retainage
+    env.ledger().set_timestamp(2_000);
+    let reason = BytesN::random(&env);
+    client.open_dispute(&owner, &1, &reason);
+
+    let m1 = client.milestone(&1);
+    assert_eq!(m1.status, MilestoneStatus::Disputed);
+    // Frozen remaining seconds = 7,777,000 - 2,000 = 7,775,000
+    assert_eq!(m1.frozen_remaining_secs, Some(7_775_000));
+
+    // Retainage locked (2,500) moved to disputed
+    let acct = client.accounting();
+    assert_eq!(acct.retainage_locked, 0);
+    assert_eq!(acct.disputed, 2_500);
+
+    // Arbiter awards $2,000 to contractor and $500 refund to owner
+    let arbiter_report = BytesN::random(&env);
+    client.resolve_dispute(&arbiter, &1, &2_000, &500, &arbiter_report);
+
+    let acct_after = client.accounting();
+    assert_eq!(acct_after.disputed, 0);
+    assert_eq!(acct_after.contractor_payable, 22_500 + 2_000); // 22.5k immediate + 2k award = 24.5k
+    assert_eq!(acct_after.owner_refundable, 500);
+}
