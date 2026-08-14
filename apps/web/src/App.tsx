@@ -5,6 +5,8 @@ import { useEscrowWorkflow } from './hooks/useEscrowWorkflow';
 import { WalletConnect } from './components/WalletConnect';
 import { DirectPaymentModal } from './components/DirectPaymentModal';
 import { RoleSwitcher } from './components/RoleSwitcher';
+import { ProjectSelector } from './components/ProjectSelector';
+import { CreateProjectModal } from './components/CreateProjectModal';
 import { RoleAcceptanceCard } from './components/RoleAcceptanceCard';
 import { FundingWorkspace } from './components/FundingWorkspace';
 import { MilestoneList } from './components/MilestoneList';
@@ -23,6 +25,7 @@ export const App: React.FC = () => {
   const freighter = useFreighter();
   const balance = useAccountBalance(freighter.publicKey);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('milestones');
 
   const [activeEvidenceMilestone, setActiveEvidenceMilestone] = useState<UIMilestone | null>(null);
@@ -87,6 +90,15 @@ export const App: React.FC = () => {
         simulatedTimeOffsetSecs={escrow.simulatedTimeOffsetSecs}
         onFastForwardDays={escrow.fastForwardDays}
         onResetDemo={escrow.resetDemo}
+      />
+
+      {/* Multi-Project Factory Selector Bar */}
+      <ProjectSelector
+        projects={escrow.projects}
+        currentProjectId={escrow.activeProjectId}
+        onSelectProject={escrow.selectProject}
+        onOpenCreateModal={() => setIsCreateModalOpen(true)}
+        activeAddress={escrow.activeAddress}
       />
 
       {/* Active Escrow Project Banner */}
@@ -247,6 +259,15 @@ export const App: React.FC = () => {
           dispute={activeArbitrationDispute}
           onClose={() => setActiveArbitrationDispute(null)}
           onResolveDispute={escrow.resolveDispute}
+          isBusy={escrow.isBusy}
+        />
+      )}
+
+      {/* Deploy Project Modal (Factory) */}
+      {isCreateModalOpen && (
+        <CreateProjectModal
+          onClose={() => setIsCreateModalOpen(false)}
+          onDeployProject={escrow.deployProject}
           isBusy={escrow.isBusy}
         />
       )}

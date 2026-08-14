@@ -96,13 +96,92 @@ export const INITIAL_PROJECT: UIProject = {
   disputes: {},
 };
 
+export const DEMO_PROJECT_2: UIProject = {
+  id: 'bb-escrow-seattle-medical',
+  title: 'Seattle Medical Pavilion - Cleanrooms & HVAC',
+  location: 'Seattle, Washington, USA',
+  contractAddress: 'CCBUILDBONDESCROW7Y3VDFG574TNDV62B6IQP7Y6YJ6B3EBRT4E3X74P4X5P7X02',
+  status: 'Active',
+  termsHash: '7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069',
+  owner: DEMO_PERSONAS.Owner.address,
+  contractor: DEMO_PERSONAS.Contractor.address,
+  inspector: DEMO_PERSONAS.Inspector.address,
+  arbiter: DEMO_PERSONAS.Arbiter.address,
+  paymentTokenSymbol: 'USDC',
+  paymentTokenAddress: 'CUSDC7Y3VDFG574TNDV62B6IQP7Y6YJ6B3EBRT4E3X74P4X5P7XTESTNET01',
+  totalCommitted: 100000,
+  retainageBps: 1000,
+  defectPeriodDays: 90,
+  fundingPolicy: 'FullyFunded',
+  createdAt: Date.now() - 7200000,
+  milestones: [
+    {
+      id: 1,
+      title: 'HEPA Air Filtration & Cleanroom Walls',
+      description: 'ISO-Class 5 compliant wall panels and ductwork sealing.',
+      amount: 40000,
+      immediateAmount: 36000,
+      retainageAmount: 4000,
+      status: 'InDefectPeriod',
+      dueAt: Math.floor(Date.now() / 1000) - 10000,
+      inspectionDeadlineSecs: 7 * 86400,
+      approvedAt: Math.floor(Date.now() / 1000) - 8000,
+      defectDeadlineAt: Math.floor(Date.now() / 1000) - 8000 + 90 * 86400,
+      retainedReleased: 0,
+    },
+    {
+      id: 2,
+      title: 'Medical Gas Lines & Backup Power',
+      description: 'Oxygen, vacuum, and N2O manifold piping with automated emergency transfer switch.',
+      amount: 60000,
+      immediateAmount: 54000,
+      retainageAmount: 6000,
+      status: 'Funded',
+      dueAt: Math.floor(Date.now() / 1000) + 20 * 86400,
+      inspectionDeadlineSecs: 7 * 86400,
+      retainedReleased: 0,
+    },
+  ],
+  acceptances: {
+    Owner: { role: 'Owner', actor: DEMO_PERSONAS.Owner.address, accepted: true, declined: false, timestamp: Math.floor(Date.now() / 1000) - 20000 },
+    Contractor: { role: 'Contractor', actor: DEMO_PERSONAS.Contractor.address, accepted: true, declined: false, timestamp: Math.floor(Date.now() / 1000) - 19000 },
+    Inspector: { role: 'Inspector', actor: DEMO_PERSONAS.Inspector.address, accepted: true, declined: false, timestamp: Math.floor(Date.now() / 1000) - 18000 },
+    Arbiter: { role: 'Arbiter', actor: DEMO_PERSONAS.Arbiter.address, accepted: true, declined: false, timestamp: Math.floor(Date.now() / 1000) - 17000 },
+  },
+  accounting: {
+    deposited: 100000,
+    committed: 100000,
+    allocated: 60000,
+    contractorPayable: 36000,
+    retainageLocked: 4000,
+    disputed: 0,
+    ownerRefundable: 0,
+    withdrawn: 0,
+  },
+  disputes: {},
+};
+
 export function useEscrowWorkflow(freighterAddress: string | null) {
-  const [project, setProject] = useState<UIProject>(INITIAL_PROJECT);
+  const [projects, setProjects] = useState<UIProject[]>([INITIAL_PROJECT, DEMO_PROJECT_2]);
+  const [activeProjectId, setActiveProjectId] = useState<string>(INITIAL_PROJECT.id);
+
   const [activeRole, setActiveRole] = useState<RoleType>('Owner');
   const [useFreighterWallet, setUseFreighterWallet] = useState<boolean>(false);
   const [simulatedTimeOffsetSecs, setSimulatedTimeOffsetSecs] = useState<number>(0);
   const [logs, setLogs] = useState<TransactionLog[]>([]);
   const [isBusy, setIsBusy] = useState<boolean>(false);
+
+  // Active project selection
+  const project = useMemo(() => {
+    return projects.find(p => p.id === activeProjectId) || projects[0];
+  }, [projects, activeProjectId]);
+
+  // Helper to mutate active project
+  const updateCurrentProject = useCallback((updater: (prev: UIProject) => UIProject) => {
+    setProjects(prevProjects =>
+      prevProjects.map(p => (p.id === activeProjectId ? updater(p) : p))
+    );
+  }, [activeProjectId]);
 
   // Current active effective address
   const activeAddress = useMemo(() => {
@@ -160,7 +239,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
       
       await new Promise(r => setTimeout(r, 600));
 
-      setProject(prev => {
+      updateCurrentProject(prev => {
         const nextAcceptances = {
           ...prev.acceptances,
           [role]: {
@@ -194,7 +273,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
     } finally {
       setIsBusy(false);
     }
-  }, [project.termsHash, simulatedLedgerTimestamp, addLog]);
+  }, [project.termsHash, simulatedLedgerTimestamp, updateCurrentProject, addLog]);
 
   // 2. Decline Role Action
   const declineRole = useCallback(async (role: RoleType, reason: string) => {
@@ -204,7 +283,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
       addLog(`Role Decline (${role})`, 'decline_role', `Declining role invitation for ${role}. Reason hash: ${reasonHash.slice(0, 10)}...`);
       await new Promise(r => setTimeout(r, 600));
 
-      setProject(prev => ({
+      updateCurrentProject(prev => ({
         ...prev,
         status: 'Suspended',
         acceptances: {
@@ -221,7 +300,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
     } finally {
       setIsBusy(false);
     }
-  }, [simulatedLedgerTimestamp, addLog]);
+  }, [simulatedLedgerTimestamp, updateCurrentProject, addLog]);
 
   // 3. Deposit & Fund Escrow Action
   const depositFunds = useCallback(async (amount: number) => {
@@ -230,7 +309,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
       addLog('Escrow Deposit', 'deposit', `Transferring ${amount.toLocaleString()} ${project.paymentTokenSymbol} via SEP-41 token client into escrow custody.`);
       await new Promise(r => setTimeout(r, 800));
 
-      setProject(prev => {
+      updateCurrentProject(prev => {
         const newDeposited = prev.accounting.deposited + amount;
         let newAllocated = prev.accounting.allocated;
 
@@ -269,7 +348,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
     } finally {
       setIsBusy(false);
     }
-  }, [project.paymentTokenSymbol, addLog]);
+  }, [project.paymentTokenSymbol, updateCurrentProject, addLog]);
 
   // 4. Submit Milestone Evidence Action
   const submitMilestone = useCallback(async (milestoneId: number, description: string, fileName?: string) => {
@@ -279,7 +358,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
       addLog(`Milestone #${milestoneId} Submission`, 'submit_milestone', `Contractor submitting completed work evidence digest: ${evidenceHash.slice(0, 16)}...`);
       await new Promise(r => setTimeout(r, 600));
 
-      setProject(prev => ({
+      updateCurrentProject(prev => ({
         ...prev,
         milestones: prev.milestones.map(m => {
           if (m.id === milestoneId) {
@@ -298,7 +377,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
     } finally {
       setIsBusy(false);
     }
-  }, [addLog]);
+  }, [updateCurrentProject, addLog]);
 
   // 5. Inspect Milestone Action (Approve / Reject)
   const inspectMilestone = useCallback(async (
@@ -312,7 +391,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
       addLog(`Milestone #${milestoneId} Inspection (${decision})`, 'inspect_milestone', `Inspector recording ${decision} certification. Report digest: ${reportHash.slice(0, 16)}...`);
       await new Promise(r => setTimeout(r, 800));
 
-      setProject(prev => {
+      updateCurrentProject(prev => {
         const targetMilestone = prev.milestones.find(m => m.id === milestoneId);
         if (!targetMilestone) return prev;
 
@@ -359,7 +438,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
     } finally {
       setIsBusy(false);
     }
-  }, [simulatedLedgerTimestamp, addLog]);
+  }, [simulatedLedgerTimestamp, updateCurrentProject, addLog]);
 
   // 6. Withdraw Earned Immediate Earnings Action
   const withdrawEarned = useCallback(async (amount: number) => {
@@ -368,7 +447,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
       addLog('Earnings Withdrawal', 'withdraw_earned', `Contractor executing pull withdrawal of ${amount.toLocaleString()} ${project.paymentTokenSymbol}.`);
       await new Promise(r => setTimeout(r, 700));
 
-      setProject(prev => ({
+      updateCurrentProject(prev => ({
         ...prev,
         accounting: {
           ...prev.accounting,
@@ -381,7 +460,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
     } finally {
       setIsBusy(false);
     }
-  }, [project.paymentTokenSymbol, addLog]);
+  }, [project.paymentTokenSymbol, updateCurrentProject, addLog]);
 
   // 7. Claim Mature Retainage Action
   const claimRetainage = useCallback(async (milestoneId: number) => {
@@ -394,7 +473,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
       addLog(`Retainage Claim (#${milestoneId})`, 'claim_retainage', `Claiming mature defect liability retainage of ${claimableAmount.toLocaleString()} ${project.paymentTokenSymbol}.`);
       await new Promise(r => setTimeout(r, 800));
 
-      setProject(prev => {
+      updateCurrentProject(prev => {
         const nextMilestones = prev.milestones.map(m => {
           if (m.id === milestoneId) {
             return {
@@ -424,7 +503,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
     } finally {
       setIsBusy(false);
     }
-  }, [project.milestones, project.paymentTokenSymbol, addLog]);
+  }, [project.milestones, project.paymentTokenSymbol, updateCurrentProject, addLog]);
 
   // 8. Open Dispute Action
   const openDispute = useCallback(async (milestoneId: number, reason: string) => {
@@ -434,7 +513,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
       addLog(`Dispute Initiated (#${milestoneId})`, 'open_dispute', `${activeRole} opening formal dispute on Milestone #${milestoneId}. Reason digest: ${reasonHash.slice(0, 16)}...`);
       await new Promise(r => setTimeout(r, 800));
 
-      setProject(prev => {
+      updateCurrentProject(prev => {
         const target = prev.milestones.find(m => m.id === milestoneId);
         if (!target) return prev;
 
@@ -500,7 +579,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
     } finally {
       setIsBusy(false);
     }
-  }, [activeRole, activeAddress, simulatedLedgerTimestamp, addLog]);
+  }, [activeRole, activeAddress, simulatedLedgerTimestamp, updateCurrentProject, addLog]);
 
   // 9. Resolve Dispute Action (Arbiter)
   const resolveDispute = useCallback(async (
@@ -515,7 +594,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
       addLog(`Arbitration Award (#${milestoneId})`, 'resolve_dispute', `Arbiter issuing binding award: Contractor $${contractorAward.toLocaleString()} / Owner Refund $${ownerRefund.toLocaleString()}.`);
       await new Promise(r => setTimeout(r, 900));
 
-      setProject(prev => {
+      updateCurrentProject(prev => {
         const targetDispute = prev.disputes[milestoneId];
         if (!targetDispute) return prev;
 
@@ -563,7 +642,31 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
     } finally {
       setIsBusy(false);
     }
-  }, [simulatedLedgerTimestamp, addLog]);
+  }, [simulatedLedgerTimestamp, updateCurrentProject, addLog]);
+
+  // 10. Deploy Project via Factory
+  const deployProject = useCallback(async (newProject: UIProject) => {
+    setIsBusy(true);
+    try {
+      addLog(
+        'Factory Escrow Deployment',
+        'deploy_project',
+        `Deploying new isolated escrow contract for "${newProject.title}" via BuildBond Factory with salt & terms hash.`
+      );
+      await new Promise(r => setTimeout(r, 1000));
+
+      setProjects(prev => [newProject, ...prev]);
+      setActiveProjectId(newProject.id);
+
+      addLog(
+        'Escrow Deployed & Registered',
+        'deploy_project',
+        `Contract instance ${newProject.contractAddress.slice(0, 10)}... deployed and indexed in factory registry.`
+      );
+    } finally {
+      setIsBusy(false);
+    }
+  }, [addLog]);
 
   // Fast forward simulated ledger time (e.g. +90 days)
   const fastForwardDays = useCallback((days: number) => {
@@ -573,13 +676,17 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
 
   // Reset demo project
   const resetDemo = useCallback(() => {
-    setProject(INITIAL_PROJECT);
+    setProjects([INITIAL_PROJECT, DEMO_PROJECT_2]);
+    setActiveProjectId(INITIAL_PROJECT.id);
     setSimulatedTimeOffsetSecs(0);
     setLogs([]);
-    addLog('Reset Workspace', 'system', 'Reset BuildBond demo project to clean initial state.');
+    addLog('Reset Workspace', 'system', 'Reset BuildBond demo projects to clean initial state.');
   }, [addLog]);
 
   return {
+    projects,
+    activeProjectId,
+    selectProject: setActiveProjectId,
     project,
     activeRole,
     setActiveRole,
@@ -601,7 +708,7 @@ export function useEscrowWorkflow(freighterAddress: string | null) {
     claimRetainage,
     openDispute,
     resolveDispute,
+    deployProject,
     resetDemo,
   };
 }
-

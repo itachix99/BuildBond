@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "contracts/buildbond-escrow",
+    "contracts/buildbond-factory",
 ]
 
 [profile.release]

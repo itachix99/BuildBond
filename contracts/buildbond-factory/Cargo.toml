@@ -1,0 +1,14 @@
+[package]
+name = "buildbond-factory"
+version = "0.1.0"
+edition = "2021"
+description = "BuildBond factory contract for deterministic escrow deployment and multi-project registry on Stellar/Soroban"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = "27.0.6"
+
+[dev-dependencies]
+soroban-sdk = { version = "27.0.6", features = ["testutils"] }
